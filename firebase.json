@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "notdop-minigames",
     "public": ".",
     "ignore": [
       "firebase.json",

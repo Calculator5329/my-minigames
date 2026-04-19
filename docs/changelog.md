@@ -4,6 +4,293 @@ A running log of what shipped in each session.
 
 ## 2026-04-19
 
+### Public hosting + GitHub repo
+The project is now version-controlled and live on the public web.
+
+- **GitHub:** pushed to https://github.com/Calculator5329/my-minigames (initial
+  commit, `main` branch). Added `.gitignore` covering `node_modules/`,
+  `.firebase/`, dev/IDE folders (`.claude/`, `.playwright-mcp/`, `.vscode/`),
+  and the per-game debug screenshots that were sitting in the repo root
+  (`reactor-*.png`, `bloom-*.png`, `diner-*.png`, `frog*-*.png`, `sigil-*.png`).
+- **Firebase Hosting:** deployed to a new dedicated site `notdop-minigames`
+  (live at https://notdop-minigames.web.app) under existing project
+  `ethan-488900`. The site is its own slot in that project's multi-site setup,
+  so the other apps living there (`stackbrawl`, `deep-rift`, `history-explorer`,
+  `space-trader`, `tax-explorer-app`, `ethan-488900`) are untouched.
+- **`firebase.json`** — `public: "."` (no build step; the project really is just
+  static `index.html` + `main.js` + `styles.css` + `games/**`), with `ignore`
+  rules that strip docs, scripts, root-level PNG screenshots, `*.md`, and any
+  package manifests from the deployed bundle. Caching headers tuned per asset
+  class: `index.html` is `no-cache`, JS/CSS get a 1-hour `must-revalidate`
+  (these change every session), and images/audio get a 1-day cache.
+- **`.firebaserc`** — default project alias `ethan-488900`.
+
+### Per-game wallet migration — starfall, stargazer, leap, ricochet, gullet, skybound (arcade batch)
+Followed `docs/plans/2026-04-19-currency-migration.md` for the six remaining
+arcade-style games whose pre-run upgrade shops were still spending the global
+theme coin pool. All six now use `Storage.*GameWallet(GID, …)` end-to-end:
+the in-game shop reads + spends the per-game wallet, the shop UI shows the
+wallet balance under the game's flavour name, and `coinsEarned()` is now
+milestone-based (driven by an in-run counter + a `victoryAchieved` flag set
+in `init()`) instead of a `floor(score/N)` divisor that leaked pickup spam
+into the global pool. Each `gameOver()` / pre-`win()` path now routes through
+a small `_awardWallet()` helper that calls `Storage.addGameWallet(GID, award)`
+exactly once. All six default to NG+/persistent — wallets and meta-progression
+in `setGameData` are untouched on victory.
+
+- `games/starfall/game.js` — wallet `'starfall'` (Stardust). `wavesClearedThisRun`
+  ticks on `this.wave++`; shop UI shows `Stardust: ●N` and uses
+  `spendGameWallet`. `coinsEarned()` is now
+  `wavesClearedThisRun * 2 + (victory ? 20 : 0)` (was `floor(score/80)`).
+- `games/stargazer/game.js` — wallet `'stargazer'` (Lensgleam). Same
+  wave-cleared accounting; `_awardWallet()` is wired into all three
+  end-of-run sites. `coinsEarned()` is
+  `wavesClearedThisRun * 2 + (victory ? 20 : 0)` (was `floor(score/200)`).
+- `games/leap/game.js` — wallet `'leap'` (Sprigs). `levelsClearedThisRun++`
+  fires when `this.completed = true`; wallet awarded on lives-out
+  `gameOver()`. `coinsEarned()` is
+  `levelsClearedThisRun * 3 + (victory ? 20 : 0)` (was `floor(score/50)`,
+  which double-counted gem pickups).
+- `games/ricochet/game.js` — wallet `'ricochet'` (Ricochets). Per-level wins
+  bump `levelsClearedThisRun`; campaign clear (`level > maxLevel`) sets
+  `victoryAchieved` and awards before the win-fanfare timeout. New
+  `coinsEarned()` is `levelsClearedThisRun + (victory ? 25 : 0)` (replaces
+  the old `floor(levelsCleared/2) - floor(misses/4)` global formula; shop
+  no longer spends from the global pool).
+- `games/gullet/game.js` — wallet `'gullet'` (Gore). `biomesClearedThisRun`
+  ticks each time `this.biomeIdx` advances on a score threshold. The third
+  biome is `scoreTo: Infinity`, so `victoryAchieved` legitimately stays
+  false — the formula handles it. `coinsEarned()` is
+  `biomesClearedThisRun * 6 + (victory ? 20 : 0)` (was `floor(score/60)`).
+- `games/skybound/game.js` — wallet `'skybound'` (Updrafts).
+  `biomesClearedThisRun` increments on `currentBiome` advancement; reaching
+  2500m sets `victoryAchieved` and counts the final biome as cleared too.
+  Shop UI/spend swapped to wallet. `coinsEarned()` is
+  `biomesClearedThisRun * 5 + (victory ? 20 : 0)` (was `floor(score/25)`,
+  which inflated heavily off pickups).
+
+All six syntax-clean. No legacy migrator needed (none of these games stored
+currency in a `setGameData` blob — they were all pulling straight from the
+global `Storage.coins`, which now stays reserved for the main theme shop).
+
+### Per-game wallet migration — crypt, snake, helicopter, frogger, breakout, asteroids
+Sixth pass through `docs/plans/2026-04-19-currency-migration.md` cleaning
+up the remaining arcade/campaign games whose between-stage shops still
+spent global theme coins. Pattern is identical across all six: the old
+`score / N` `coinsEarned()` formula moved into `onEnd()` and now funds
+the per-game wallet (`Storage.*GameWallet(GID)`); the new `coinsEarned()`
+is milestone-based (units cleared this run + victory bonus); shop UI
+shows the per-game balance instead of `Storage.getCoins()`. Existing
+meta-progression (`bestX`, `perks`, `defeated*` flags) stays in
+`Storage.setGameData`. NG+/persistent — no `clearGameData` on victory.
+
+- `games/crypt/game.js`: wallet `'crypt'`. `init()` adds
+  `floorsClearedThisRun` + `victoryAchieved`. Counter increments at the
+  stairs descent and on boss kill; `victoryAchieved` set just before
+  the deferred `this.win()`. Shop check + spend (`_updateShop`) and
+  `_renderShop` header swapped to `getGameWallet/spendGameWallet`. New
+  `onEnd` deposits `floor(score / 75)` into the crypt wallet so loot
+  chests/kills still translate to upgrade money. New `coinsEarned()`:
+  `floorsClearedThisRun * 2 + (victory ? 20 : 0)` (was `score / 75`).
+- `games/snake/game.js`: wallet `'snake'`. `init()` adds
+  `biomesClearedThisRun` + `victoryAchieved`. Counter increments inside
+  `_defeatWorm` after the boss falls; `victoryAchieved` set in
+  `_updateVictory` before `this.win()`. Commissary
+  (`_updateShop`/`_renderShop`) swapped to `getGameWallet`/
+  `spendGameWallet`, header reads "Snake purse: ●N". `onEnd` keeps
+  funding the wallet at `floor(score / 35)` so apple score still buys
+  perks. New `coinsEarned()`: `biomesClearedThisRun * 6 + (victory ? 20 : 0)`.
+- `games/helicopter/game.js`: wallet `'helicopter'`. `init()` adds
+  `biomesClearedThisRun` + `victoryAchieved`. `_defeatBoss` increments
+  the counter; `_updateVictory` flips `victoryAchieved` before
+  `this.win()`. Hangar shop (`_updateShop`/`_renderShop`) spends
+  `getGameWallet('helicopter')` / `spendGameWallet`. `onEnd` deposits
+  `floor(score / 220)` into the wallet (the in-run `coinBonus`/`distance`
+  economy still funds upgrades). New `coinsEarned()`:
+  `biomesClearedThisRun * 6 + (victory ? 20 : 0)`.
+- `games/frogger/game.js`: wallet `'frogger'`. `init()` adds
+  `daysCompletedThisRun` + `victoryAchieved`. `_updatePlay` increments
+  the counter when `dayPadsFilled >= day.target`; the hawk-victory path
+  in `_updateBossLogic` increments and sets `victoryAchieved` together.
+  Marsh shop (`_updateShop`/`_renderShop`) swapped to
+  `getGameWallet`/`spendGameWallet`, header reads "Marsh purse: ●N".
+  `onEnd` deposits `floor(score / 50)` into the wallet. New
+  `coinsEarned()`: `daysCompletedThisRun * 4 + (victory ? 20 : 0)`.
+- `games/breakout/game.js`: wallet `'breakout'`. `init()` adds
+  `worldsClearedThisRun` + `victoryAchieved`. `_updClear` increments
+  the counter on each world transition (including the world-5 → boss
+  jump, so a full clear yields 5 increments + 20 victory bonus).
+  `_updVictory` sets `victoryAchieved` before `this.win()`. Perk shop
+  (`_updShop`/`_renderShop`) reads/spends the wallet, header label
+  "Brick fund: ●N". `onEnd` deposits `floor(score / 120)` into the
+  wallet. New `coinsEarned()`:
+  `worldsClearedThisRun * 5 + (victory ? 20 : 0)`.
+- `games/asteroids/game.js`: wallet `'asteroids'`. The two existing
+  per-wave / per-boss `Storage.addCoins` payouts (5 + 2*wave for normal
+  clears, 30/60 for the bosses) flipped to
+  `Storage.addGameWallet('asteroids', ...)`. Upgrade Bay
+  (`_updateShop`/`_renderShop`) spends `spendGameWallet`. HUD now reads
+  "Bay ●N" via `getGameWallet`. `init()` adds `wavesClearedThisRun` +
+  `victoryAchieved`; counter increments on both normal wave clear and
+  boss defeat (so kills of Swarm Lord / Hive Queen close out waves 5/10).
+  Hive defeat sets `victoryAchieved = true`. New `coinsEarned()`:
+  `wavesClearedThisRun * 1 + (victory ? 20 : 0)` (was hard-coded `0`),
+  so global theme coins finally trickle out of asteroid runs without
+  double-dipping the in-game economy.
+
+### Per-game wallet migration — orbital, reactor, franchise (econ-sim trio)
+Followed `docs/plans/2026-04-19-currency-migration.md` for the three
+remaining economic-simulation games. These were trickier than the
+arcade-style batch because each one generates currency from gameplay
+loops (rounds, days, autobuyers) rather than pickups, so the wallet had
+to be wired without disrupting the in-run economy. `cash` stays
+run-volatile in all three; only meta-currency moved to the wallet.
+
+- `games/orbital/game.js` + `games/orbital/lib/persist.js`: in-round
+  `cash` (used to buy/upgrade towers) is unchanged. Stardust — the
+  meta-currency the side-panel HUD already renders for Phase 4 — now
+  lives in `Storage.*GameWallet('orbital')`. `lib/persist.js` got a
+  one-shot legacy reader that lifts any pre-existing `data.stardust`
+  field into the wallet on first load and strips it from the data blob.
+  Round-clear deposits +1 stardust; victory deposits +25 (in addition to
+  global theme coins). Engine destructure picked up `Storage`. New
+  `coinsEarned()`: `roundsClearedThisRun + (victory ? 25 : 0)` (was
+  `floor(score / 40)`, which leaked bounty * 5 into global coins).
+  `runStardust` is seeded from the wallet in `init()` so the HUD shows
+  the persistent total even before the first round.
+- `games/reactor/research.js` + `games/reactor/game.js`: `cash` /
+  `totalEarned` stay in-run. RP (research points) moved out of
+  `mergeGameData('reactor', { research: { points } })` and into
+  `Storage.*GameWallet('reactor')`. One-shot legacy reader in
+  `migrateLegacy()` lifts the old `research.points` value into the
+  wallet on first access and writes the data blob back without that
+  field. `award()` calls `addGameWallet`; `buy()` calls
+  `spendGameWallet`; `getState().points` reads the wallet so all
+  existing UI (recap "+N RP" line, RP-available header, day-end HUD)
+  works unchanged. `_endDay()` increments `daysCompletedThisRun` and
+  sets `victoryAchieved` on `campaign_complete`. New `coinsEarned()`:
+  `daysCompletedThisRun * 4 + (victory ? 25 : 0)` (was
+  `floor(score / 400)` where score = totalEarned, dollars-leaking).
+  `bought` / `bestDay` / `campaignsBeaten` / `endlessUnlocked` still
+  live in `gameData` via `setGameData`.
+- `games/franchise/game.js`: `cash` and net-worth state stay in-run.
+  Stardollars moved out of `this.save.stardollars` and into
+  `Storage.*GameWallet('franchise')`. One-shot legacy reader in
+  `init()` checks `this.save.stardollars > 0` after the data-blob load,
+  pours it into the wallet, zeroes the blob field, and writes back.
+  `endCampaign()` deposits `F.stardollarsFor(peakNetWorth)` into the
+  wallet instead of the save blob. Meta-shop spend (`_updateShop`)
+  now goes through `spendGameWallet`. `_renderShop` reads the wallet
+  via a new `_stardollars()` accessor for both the header and per-card
+  affordability checks. `endCity('win')` increments
+  `citiesClearedThisRun`; `endCampaign(true)` increments
+  `campaignsWonThisRun` and sets `victoryAchieved`. New
+  `coinsEarned()`: `citiesClearedThisRun * 5 + campaignsWonThisRun * 25`
+  (was `floor(score / 5000)` against peak net worth — indirectly leaked
+  the autobuyer economy into the global pool).
+
+All three games default to NG+/persistent (no wipe-on-victory). Save
+compatibility preserved via legacy migrators on reactor + franchise;
+orbital persist.js also lifts any pre-existing data-blob stardust into
+the wallet. All five edited files pass
+`node -e "new Function(require('fs').readFileSync('<path>','utf8'))"`.
+
+### Per-game wallet migration — bloom, barrage, tanks, diner, sigil
+Followed `docs/plans/2026-04-19-currency-migration.md`. Five more games
+moved off the global theme-coin pool and onto namespaced per-game
+wallets (`Storage.*GameWallet(GAME_ID, ...)`). All five now earn theme
+coins from milestone counters, not pickup-inflated `score / N` formulas.
+
+- `games/bloom/game.js`: `runCoins` now seeded from
+  `getGameWallet('bloom')` and persisted on every mote pickup, boss
+  kill, biome advance, death, and shop transaction. Removed
+  `Storage.addCoins(this.runCoins)` from the post-run shop's continue
+  button (was leaking motes into the global pool). Shop spends via
+  `spendGameWallet`. Killing The Maw in the Void biome now sets
+  `victoryAchieved = true` and calls `this.win()` (previously the run
+  just sat in 'biomeUp' with no terminator). New `coinsEarned()`:
+  `biomesClearedThisRun * 8 + (victory ? 25 : 0)`.
+- `games/barrage/game.js`: `coinsHeld` seeded from
+  `getGameWallet('barrage')`; persisted at every wave end and on city
+  loss. Shop's `_buy` spends via `spendGameWallet`. Tracks
+  `wavesClearedThisRun`, sets `victoryAchieved` before the win timeout.
+  New `coinsEarned()`: `waves * 3 + (victory ? 20 : 0)`.
+- `games/tanks/game.js`: `coinsHeld` seeded from
+  `getGameWallet('tanks')`; persisted on match win and game over. Shop
+  weapon purchases spend via `spendGameWallet`. Tracks
+  `matchesWonThisRun`, sets `victoryAchieved` before final `win()`.
+  New `coinsEarned()`: `matches * 4 + (victory ? 20 : 0)`.
+- `games/diner/game.js`: removed broken `NDP.Engine.Storage.coins` /
+  `Storage.save()` direct-mutation calls (no such API). The kitchen
+  shop now reads `getGameWallet('diner')` and spends via
+  `spendGameWallet`. Each day's `dayTips` is banked into the wallet at
+  day-end so the player has tips to spend in the next sanctum visit.
+  Tracks `daysCompletedThisRun`; the critic-day clear sets
+  `victoryAchieved` before the victory splash. New `coinsEarned()`:
+  `days * 5 + (victory ? 25 : 0)`.
+- `games/sigil/game.js`: removed broken `NDP.Engine.Storage.coins` /
+  `Storage.save()` calls. Sanctum reads `getGameWallet('sigil')` and
+  spends via `spendGameWallet`. `_defeatBoss` deposits
+  `60 + ch.n * 40` essence into the wallet so chapter clears feed the
+  perk shop directly. Tracks `chaptersClearedThisRun`; clearing the
+  Dragon (last chapter) sets `victoryAchieved` before `this.win()`.
+  New `coinsEarned()`: `chapters * 8 + (victory ? 25 : 0)`.
+
+All five files pass `node -e "new Function(...)"` syntax checks. Meta
+state (best wave / best biome / unlocked weapons / unlocked glyphs /
+stations / perks / best chapter / best day) preserved; only currency
+plumbing changed. Default-to-NG+ (no wipe-on-victory) for all five —
+matches plan guidance for non-vaultbreaker games.
+
+
+
+### Franchise Frenzy — multi-city campaign expansion
+User feedback: "Franchise frenzy only has one 60s level lets immprove it."
+Followed the pattern that landed for Reactor earlier today — turn the
+single 60-second shift into a 5-city campaign with persistent
+meta-progression, in-run depth, and new content. See full design in
+`docs/plans/2026-04-19-franchise-expansion.md`.
+
+- `games/franchise/data.js` (NEW): catalog file. 10 business tiers
+  (3 new — Casino at city 3, Movie Studio at city 4, Spaceport at
+  city 5), 5 cities (Smalltown → Skyport, exponential targets
+  $5K → $40M), 5 random events (Rush Hour, Viral Moment, Tax Audit,
+  Investor Knock, Power Outage), 5 meta upgrades (Seed Capital,
+  Click Force, Industry Boost, Tycoon Time, Headhunter), synergy
+  curve (×1.25 / ×2 / ×4 at 10/25/50 owned), manager + Stardollar
+  formulas. Pure data — no canvas, no engine refs. Published as
+  `window.NDP.Franchise`.
+- `games/franchise/game.js`: full rewrite. State machine now has four
+  phases — `shop` → `play` → `transition` → `debrief`. Pre-campaign
+  shop UI shows progress strip, Stardollar count, all 5 meta upgrade
+  cards with current/next effect labels, and a BEGIN CAMPAIGN button.
+  Play loop owns the per-city run: cash and businesses persist across
+  cities; per-city net-worth target with checkmark indicator; tier
+  reveal gated by both cash threshold *and* `unlockCity`; manager
+  hire flow (button → click target tier card to assign; auto-buyer
+  on a 0.6 s cadence); event scheduler that fires N events per city
+  with banner + countdown bar + colored vignette overlay; floating
+  green envelope for the Investor event with 5 s click window;
+  city-5 boss panel ("Hostile Takeover") that replaces the flagship
+  for 15 s and forces the player to choose between earning cash or
+  hammering the OUTBID button. Debrief screen shows campaign
+  summary, awards Stardollars, offers SPEND STARDOLLARS (back to
+  shop) or FINISH RUN (kicks the global end overlay so coins are
+  awarded). Per-city background tint via `CITIES[i].bg`. Shop card
+  layout grew from 2×4 to 2×5 to fit all 10 tiers; locked tiers
+  show "unlocks <CityName>" instead of a generic "??? LOCKED ???".
+  Coin formula recalibrated (`floor(score / 5000)`) since net worth
+  now ranges into the millions.
+- `games/franchise/manifest.js`: blurb + description + controls
+  rewritten for the campaign. Manifest preview unchanged.
+- `index.html`: load `games/franchise/data.js` between manifest and
+  game.js; cache-bust all three with `?v=2`.
+- Tested in browser: shop renders → BEGIN CAMPAIGN → city 1 plays →
+  flagship clicks earn cash → buying lemonade ticks $/s → end of
+  city → debrief on miss / transition on win → city 2 unlocks
+  manager button, casino still gated to Boomburg → cash + tiers
+  carry over across cities.
+
 ### Learn to Heist — Booster fix (was useless at base tier)
 User reported "the booster doesn't work at all". Root cause: tier 0
 "Firecracker" thrust was **480 m/s²** while gravity is **520 m/s²**, so

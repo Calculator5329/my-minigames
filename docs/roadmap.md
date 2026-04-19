@@ -9,7 +9,7 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 
 ### Shipped (27)
 - [x] Gullet
-- [x] Franchise Frenzy
+- [x] **Franchise Frenzy** — *expanded into 5-city campaign + Stardollar meta-shop on 2026-04-19*
 - [x] Ricochet
 - [x] Skybound
 - [x] Deflect
@@ -49,6 +49,10 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 - Pac-lite — single-room dot-eater with one ghost
 
 ## Cross-cutting goals
+- [x] **Public hosting + GitHub (2026-04-19)** — repo pushed to
+      https://github.com/Calculator5329/my-minigames, deployed to
+      https://notdop-minigames.web.app via Firebase Hosting in project
+      `ethan-488900` (dedicated multi-site slot `notdop-minigames`).
 - [x] **Depth pass — Shallow Six (2026-04-19)** — Bloom, Deflect, Stargazer,
       Ricochet, Sigil, Diner all rebuilt with progression, bosses, perks, and
       custom inline-SVG art via the new `engine/sprites.js`.
@@ -75,6 +79,18 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
       Endless mode, 10-node research tree saved across runs. Reactor is now
       five files (`modules.js`, `events.js`, `research.js`, `campaign.js`,
       `game.js`) sharing the `NDP.Reactor` namespace.
+- [x] **Franchise Frenzy — 5-city campaign + Stardollar shop (2026-04-19)**
+      — single 60s shift expanded to a 5-city campaign (Smalltown →
+      Skyport, exponential targets $5K → $40M). Cash and businesses
+      persist between cities; pre-run Stardollar shop with 5 permanent
+      upgrades (Seed Capital, Click Force, Industry Boost, Tycoon Time,
+      Headhunter, 4 levels each). 3 new business tiers (Casino, Movie
+      Studio, Spaceport) gated to later cities, synergy bonuses at
+      10/25/50 owned, manager auto-buyers, 5 random events, and a
+      city-5 "Hostile Takeover" boss bid. Two files
+      (`franchise/data.js`, `franchise/game.js`) sharing the
+      `NDP.Franchise` namespace. Plan in
+      `docs/plans/2026-04-19-franchise-expansion.md`.
 - [ ] Sound: replace 404'd sample assets (`assets/audio/hit.mp3`, `coin.mp3`, `launch.mp3`) with synth fallbacks or commit the files.
 - [ ] Mobile / touch input pass — many games assume mouse + keyboard.
 - [ ] Accessibility audit (color contrast on themes, key bindings).
