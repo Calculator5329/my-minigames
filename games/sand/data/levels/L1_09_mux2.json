@@ -1,0 +1,394 @@
+{
+  "id": "L1_09_mux2",
+  "layer": "L1",
+  "order": 9,
+  "title": "2:1 MUX",
+  "brief": "Select between A and B using S.",
+  "allowedComponents": [
+    "pad_in",
+    "pad_out",
+    "power",
+    "ground",
+    "switch",
+    "pullup",
+    "buffer",
+    "not",
+    "and",
+    "or",
+    "nand",
+    "nor"
+  ],
+  "io": {
+    "inputs": [
+      "A",
+      "B",
+      "S"
+    ],
+    "outputs": [
+      "Y"
+    ]
+  },
+  "truthTable": [
+    {
+      "in": [
+        0,
+        0,
+        0
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        0,
+        0,
+        1
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        0,
+        1,
+        0
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        0,
+        1,
+        1
+      ],
+      "out": [
+        1
+      ]
+    },
+    {
+      "in": [
+        1,
+        0,
+        0
+      ],
+      "out": [
+        1
+      ]
+    },
+    {
+      "in": [
+        1,
+        0,
+        1
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        1,
+        1,
+        0
+      ],
+      "out": [
+        1
+      ]
+    },
+    {
+      "in": [
+        1,
+        1,
+        1
+      ],
+      "out": [
+        1
+      ]
+    }
+  ],
+  "starGoals": {
+    "gates": {
+      "3star": 6,
+      "2star": 8
+    },
+    "ticks": {
+      "3star": 4,
+      "2star": 6
+    }
+  },
+  "unlocksComponent": {
+    "id": "mux2",
+    "name": "2:1 MUX"
+  },
+  "referenceSolution": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "n1",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "A",
+          "value": 0
+        }
+      },
+      {
+        "id": "n2",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "B",
+          "value": 0
+        }
+      },
+      {
+        "id": "n3",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "S",
+          "value": 0
+        }
+      },
+      {
+        "id": "n4",
+        "type": "pad_out",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "Y"
+        }
+      },
+      {
+        "id": "n5",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n6",
+        "type": "ground",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n7",
+        "type": "pullup",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n8",
+        "type": "power",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n9",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n10",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n11",
+        "type": "power",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n12",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n13",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      }
+    ],
+    "wires": [
+      {
+        "id": "w1",
+        "from": {
+          "node": "n6",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w2",
+        "from": {
+          "node": "n3",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w3",
+        "from": {
+          "node": "n5",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n7",
+          "pin": "a"
+        }
+      },
+      {
+        "id": "w4",
+        "from": {
+          "node": "n8",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n9",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w5",
+        "from": {
+          "node": "n7",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n9",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w6",
+        "from": {
+          "node": "n9",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n10",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w7",
+        "from": {
+          "node": "n1",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n10",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w8",
+        "from": {
+          "node": "n11",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n12",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w9",
+        "from": {
+          "node": "n3",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n12",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w10",
+        "from": {
+          "node": "n12",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n13",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w11",
+        "from": {
+          "node": "n2",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n13",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w12",
+        "from": {
+          "node": "n10",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n4",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w13",
+        "from": {
+          "node": "n13",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n4",
+          "pin": "in"
+        }
+      }
+    ],
+    "nextNodeId": 14,
+    "nextWireId": 14
+  }
+}

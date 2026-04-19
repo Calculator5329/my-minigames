@@ -1,0 +1,202 @@
+{
+  "id": "L1_10_tristate",
+  "layer": "L1",
+  "order": 10,
+  "title": "Tri-state buffer",
+  "brief": "When EN is high, pass D. When EN is low, Y is low (default).",
+  "allowedComponents": [
+    "pad_in",
+    "pad_out",
+    "power",
+    "ground",
+    "switch",
+    "pullup",
+    "buffer",
+    "not",
+    "and",
+    "or",
+    "nand",
+    "nor"
+  ],
+  "io": {
+    "inputs": [
+      "D",
+      "EN"
+    ],
+    "outputs": [
+      "Y"
+    ]
+  },
+  "truthTable": [
+    {
+      "in": [
+        0,
+        0
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        0,
+        1
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        1,
+        0
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        1,
+        1
+      ],
+      "out": [
+        1
+      ]
+    }
+  ],
+  "starGoals": {
+    "gates": {
+      "3star": 2,
+      "2star": 4
+    },
+    "ticks": {
+      "3star": 2,
+      "2star": 4
+    }
+  },
+  "unlocksComponent": {
+    "id": "tristate",
+    "name": "Tri-state"
+  },
+  "referenceSolution": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "n1",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "D",
+          "value": 0
+        }
+      },
+      {
+        "id": "n2",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "EN",
+          "value": 0
+        }
+      },
+      {
+        "id": "n3",
+        "type": "pad_out",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "Y"
+        }
+      },
+      {
+        "id": "n4",
+        "type": "power",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n5",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n6",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      }
+    ],
+    "wires": [
+      {
+        "id": "w1",
+        "from": {
+          "node": "n4",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w2",
+        "from": {
+          "node": "n1",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w3",
+        "from": {
+          "node": "n5",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n6",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w4",
+        "from": {
+          "node": "n2",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n6",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w5",
+        "from": {
+          "node": "n6",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n3",
+          "pin": "in"
+        }
+      }
+    ],
+    "nextNodeId": 7,
+    "nextWireId": 6
+  }
+}

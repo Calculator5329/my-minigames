@@ -1,0 +1,14 @@
+{
+  "files": [
+    "L1_01_buffer.json",
+    "L1_02_not.json",
+    "L1_03_and.json",
+    "L1_04_or.json",
+    "L1_05_nand.json",
+    "L1_06_nor.json",
+    "L1_07_xor.json",
+    "L1_08_xnor.json",
+    "L1_09_mux2.json",
+    "L1_10_tristate.json"
+  ]
+}

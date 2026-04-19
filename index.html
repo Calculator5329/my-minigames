@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>NotDop — Minigames</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="selector" class="view">
+  <header class="top-bar">
+    <h1 class="logo"><span class="logo-not">NOT</span><span class="logo-dop">DOP</span></h1>
+    <div class="meta">
+      <span class="coins" id="coin-display">&#9679; 0</span>
+      <button class="icon-btn" id="mute-btn" title="Mute (M)">&#x1F50A;</button>
+      <button class="icon-btn" id="shop-btn" title="Themes">Themes</button>
+    </div>
+  </header>
+
+  <section class="grid" id="grid"></section>
+
+  <footer class="bottom-bar">
+    <span>Click a card to play &middot; Earn coins &middot; Unlock themes</span>
+  </footer>
+</div>
+
+<div id="arcade" class="view hidden">
+  <div class="arcade-topbar">
+    <button class="icon-btn" id="back-btn">&larr; Back</button>
+    <span class="game-title" id="game-title"></span>
+    <span class="hud" id="hud"></span>
+  </div>
+  <div class="stage">
+    <canvas id="stage-canvas" width="960" height="600"></canvas>
+    <div class="overlay hidden" id="overlay"></div>
+  </div>
+</div>
+
+<div id="shop" class="view hidden">
+  <div class="arcade-topbar">
+    <button class="icon-btn" id="shop-back-btn">&larr; Back</button>
+    <span class="game-title">Cosmetic Themes</span>
+    <span class="hud"><span class="coins" id="shop-coins">&#9679; 0</span></span>
+  </div>
+  <div class="shop-body" id="shop-body"></div>
+</div>
+
+<!-- engine -->
+<script src="engine/storage.js"></script>
+<script src="engine/input.js"></script>
+<script src="engine/audio.js"></script>
+<script src="engine/draw.js"></script>
+<script src="engine/game.js"></script>
+<script src="engine/assets.js"></script>
+<script src="engine/sprites.js"></script>
+
+<!-- games: manifest then game class, each registers with NDP -->
+<script src="games/gullet/manifest.js"></script>
+<script src="games/gullet/game.js"></script>
+<script src="games/franchise/manifest.js?v=2"></script>
+<script src="games/franchise/data.js?v=2"></script>
+<script src="games/franchise/game.js?v=2"></script>
+<script src="games/ricochet/manifest.js"></script>
+<script src="games/ricochet/game.js"></script>
+<script src="games/skybound/manifest.js"></script>
+<script src="games/skybound/game.js"></script>
+<script src="games/deflect/sprites.js"></script>
+<script src="games/deflect/manifest.js"></script>
+<script src="games/deflect/game.js"></script>
+<script src="games/bloom/sprites.js"></script>
+<script src="games/bloom/manifest.js"></script>
+<script src="games/bloom/game.js"></script>
+<script src="games/sigil/sprites.js?v=2"></script>
+<script src="games/sigil/manifest.js?v=2"></script>
+<script src="games/sigil/game.js?v=2"></script>
+<script src="games/barrage/manifest.js"></script>
+<script src="games/barrage/game.js"></script>
+<script src="games/diner/sprites.js?v=2"></script>
+<script src="games/diner/manifest.js?v=2"></script>
+<script src="games/diner/game.js?v=2"></script>
+<script src="games/stargazer/manifest.js"></script>
+<script src="games/stargazer/game.js"></script>
+<script src="games/tanks/manifest.js?v=3"></script>
+<script src="games/tanks/game.js?v=3"></script>
+<script src="games/bulwark/manifest.js"></script>
+<script src="games/bulwark/game.js"></script>
+<script src="games/starfall/manifest.js"></script>
+<script src="games/starfall/game.js"></script>
+<script src="games/leap/manifest.js"></script>
+<script src="games/leap/game.js"></script>
+<script src="games/crypt/manifest.js"></script>
+<script src="games/crypt/game.js"></script>
+<script src="games/depths/manifest.js"></script>
+<script src="games/depths/game.js"></script>
+<script src="games/vaultbreaker/manifest.js"></script>
+<script src="games/vaultbreaker/game.js"></script>
+<script src="games/orbital/sprites.js"></script>
+<script src="games/orbital/manifest.js"></script>
+<script src="games/orbital/game.js?v=2"></script>
+<script src="games/learntoheist/content.js?v=2"></script>
+<script src="games/learntoheist/world.js?v=2"></script>
+<script src="games/learntoheist/manifest.js?v=2"></script>
+<script src="games/learntoheist/game.js?v=2"></script>
+<script src="games/sand/lib/model.js"></script>
+<script src="games/sand/lib/primitives.js"></script>
+<script src="games/sand/lib/sim.js"></script>
+<script src="games/sand/lib/analyze.js"></script>
+<script src="games/sand/lib/compile.js"></script>
+<script src="games/sand/lib/levelrun.js"></script>
+<script src="games/sand/lib/levels.js"></script>
+<script src="games/sand/lib/progress.js"></script>
+<script src="games/sand/lib/camera.js"></script>
+<script src="games/sand/lib/glyphs.js"></script>
+<script src="games/sand/lib/render.js"></script>
+<script src="games/sand/lib/input-workspace.js"></script>
+<script src="games/sand/lib/ui-palette.js"></script>
+<script src="games/sand/lib/ui-iopanel.js"></script>
+<script src="games/sand/lib/ui-topbar.js?v=2"></script>
+<script src="games/sand/lib/ui-brief.js?v=2"></script>
+<script src="games/sand/manifest.js"></script>
+<script src="games/sand/game.js?v=2"></script>
+<script src="games/reactor/manifest.js?v=4"></script>
+<script src="games/reactor/modules.js?v=4"></script>
+<script src="games/reactor/events.js?v=4"></script>
+<script src="games/reactor/research.js?v=4"></script>
+<script src="games/reactor/campaign.js?v=4"></script>
+<script src="games/reactor/game.js?v=4"></script>
+<script src="games/snake/sprites.js?v=2"></script>
+<script src="games/snake/manifest.js?v=2"></script>
+<script src="games/snake/game.js?v=2"></script>
+<script src="games/pong/sprites.js?v=2"></script>
+<script src="games/pong/manifest.js?v=2"></script>
+<script src="games/pong/game.js?v=2"></script>
+<script src="games/breakout/sprites.js?v=2"></script>
+<script src="games/breakout/manifest.js?v=2"></script>
+<script src="games/breakout/game.js?v=2"></script>
+<script src="games/asteroids/sprites.js?v=2"></script>
+<script src="games/asteroids/manifest.js?v=2"></script>
+<script src="games/asteroids/game.js?v=2"></script>
+<script src="games/frogger/sprites.js?v=2"></script>
+<script src="games/frogger/manifest.js?v=2"></script>
+<script src="games/frogger/game.js?v=2"></script>
+<script src="games/helicopter/sprites.js?v=2"></script>
+<script src="games/helicopter/manifest.js?v=2"></script>
+<script src="games/helicopter/game.js?v=2"></script>
+<script src="games/switchboard/content.js"></script>
+<script src="games/switchboard/voices.js"></script>
+<script src="games/switchboard/board.js"></script>
+<script src="games/switchboard/nights.js"></script>
+<script src="games/switchboard/walkthrough.js"></script>
+<script src="games/switchboard/manifest.js"></script>
+<script src="games/switchboard/game.js"></script>
+
+<!-- main last -->
+<script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,207 @@
+{
+  "id": "L1_04_or",
+  "layer": "L1",
+  "order": 4,
+  "title": "OR",
+  "brief": "Output high when either input is high.",
+  "allowedComponents": [
+    "pad_in",
+    "pad_out",
+    "power",
+    "ground",
+    "switch",
+    "pullup"
+  ],
+  "io": {
+    "inputs": [
+      "A",
+      "B"
+    ],
+    "outputs": [
+      "Y"
+    ]
+  },
+  "truthTable": [
+    {
+      "in": [
+        0,
+        0
+      ],
+      "out": [
+        0
+      ]
+    },
+    {
+      "in": [
+        0,
+        1
+      ],
+      "out": [
+        1
+      ]
+    },
+    {
+      "in": [
+        1,
+        0
+      ],
+      "out": [
+        1
+      ]
+    },
+    {
+      "in": [
+        1,
+        1
+      ],
+      "out": [
+        1
+      ]
+    }
+  ],
+  "starGoals": {
+    "gates": {
+      "3star": 2,
+      "2star": 4
+    },
+    "ticks": {
+      "3star": 1,
+      "2star": 3
+    }
+  },
+  "unlocksComponent": {
+    "id": "or",
+    "name": "OR"
+  },
+  "referenceSolution": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "n1",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "A",
+          "value": 0
+        }
+      },
+      {
+        "id": "n2",
+        "type": "pad_in",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "B",
+          "value": 0
+        }
+      },
+      {
+        "id": "n3",
+        "type": "pad_out",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {
+          "label": "Y"
+        }
+      },
+      {
+        "id": "n4",
+        "type": "power",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n5",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      },
+      {
+        "id": "n6",
+        "type": "switch",
+        "x": 0,
+        "y": 0,
+        "label": "",
+        "props": {}
+      }
+    ],
+    "wires": [
+      {
+        "id": "w1",
+        "from": {
+          "node": "n4",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w2",
+        "from": {
+          "node": "n4",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n6",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w3",
+        "from": {
+          "node": "n1",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n5",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w4",
+        "from": {
+          "node": "n2",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n6",
+          "pin": "gate"
+        }
+      },
+      {
+        "id": "w5",
+        "from": {
+          "node": "n5",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n3",
+          "pin": "in"
+        }
+      },
+      {
+        "id": "w6",
+        "from": {
+          "node": "n6",
+          "pin": "out"
+        },
+        "to": {
+          "node": "n3",
+          "pin": "in"
+        }
+      }
+    ],
+    "nextNodeId": 7,
+    "nextWireId": 7
+  }
+}

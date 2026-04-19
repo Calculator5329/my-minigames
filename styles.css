@@ -1,0 +1,277 @@
+/* ===========================================================
+   NotDop Minigames — global styles
+   Theme-driven: --bg, --fg, --accent, --accent2 can be swapped.
+   =========================================================== */
+:root {
+  --bg: #0e1116;
+  --bg2: #151a22;
+  --fg: #e7ecf3;
+  --fg-dim: #8892a6;
+  --accent: #ffcc33;
+  --accent2: #ff5e7e;
+  --good: #4ade80;
+  --bad:  #f87171;
+  --card-radius: 14px;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ui:   Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--ui);
+  background: radial-gradient(1200px 800px at 50% -10%, #1e2430 0%, var(--bg) 60%) fixed;
+  color: var(--fg);
+  overflow: hidden;
+  user-select: none;
+}
+
+.view { width: 100%; height: 100vh; display: flex; flex-direction: column; }
+.hidden { display: none !important; }
+
+/* ---------- Top bar ---------- */
+.top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 28px 12px;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: 2px;
+  margin: 0;
+}
+.logo-not { color: var(--fg); }
+.logo-dop { color: var(--accent); }
+
+.meta { display: flex; gap: 10px; align-items: center; }
+
+.coins {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #00000060;
+  border: 1px solid #ffcc3340;
+}
+
+.icon-btn {
+  font-family: var(--ui);
+  background: #00000060;
+  color: var(--fg);
+  border: 1px solid #ffffff1a;
+  border-radius: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all .15s ease;
+}
+.icon-btn:hover { background: #ffffff14; border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Selector grid ---------- */
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
+  padding: 8px 28px 28px;
+  overflow-y: auto;
+}
+
+.card {
+  position: relative;
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  cursor: pointer;
+  aspect-ratio: 4 / 3;
+  background: #0b0e13;
+  border: 1px solid #ffffff0f;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.card:hover {
+  transform: translateY(-3px) scale(1.015);
+  border-color: var(--card-accent, var(--accent));
+  box-shadow: 0 8px 30px -8px var(--card-accent, var(--accent)), 0 0 0 1px var(--card-accent, var(--accent)) inset;
+}
+
+.card canvas { width: 100%; height: 100%; display: block; }
+
+.card-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, transparent 45%, #000000cc 100%);
+  pointer-events: none;
+}
+.card-title {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: .5px;
+  color: #fff;
+  text-shadow: 0 2px 8px #000;
+}
+.card-blurb {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-top: 3px;
+  text-shadow: 0 1px 3px #000;
+}
+.card-hi {
+  position: absolute;
+  top: 10px; right: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #fff;
+  background: #00000090;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #ffffff1a;
+}
+
+/* ---------- Bottom bar ---------- */
+.bottom-bar {
+  padding: 8px 28px 14px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ---------- Arcade / game view ---------- */
+.arcade-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid #ffffff0c;
+}
+.game-title {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--fg);
+}
+.hud {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-dim);
+  display: flex; gap: 12px;
+}
+.hud b { color: var(--fg); font-weight: 700; }
+
+.stage {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+}
+
+#stage-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+  border-radius: 10px;
+  box-shadow: 0 12px 60px -20px #000;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ---------- Overlay (title/pause/game-over) ---------- */
+.overlay {
+  position: absolute;
+  inset: 10px;
+  border-radius: 10px;
+  background: radial-gradient(600px 400px at 50% 40%, #0a0d12e6, #000000f5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  padding: 24px;
+  animation: fade-in .2s ease;
+}
+.overlay h2 {
+  font-family: var(--mono);
+  font-size: 38px;
+  letter-spacing: 3px;
+  color: var(--accent);
+  margin: 0;
+  text-shadow: 0 0 18px var(--accent);
+}
+.overlay p { color: #e7ecf3; margin: 0; max-width: 520px; line-height: 1.45; }
+.overlay .score-line { font-family: var(--mono); font-size: 16px; color: var(--fg-dim); }
+.overlay .score-line b { color: var(--fg); }
+.overlay .coin-earned { color: var(--accent); font-family: var(--mono); }
+
+.overlay .btns { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; justify-content: center; }
+.overlay button {
+  font-family: var(--ui);
+  background: #ffffff12;
+  color: var(--fg);
+  border: 1px solid #ffffff22;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all .15s ease;
+}
+.overlay button:hover { background: var(--accent); color: #111; border-color: var(--accent); }
+.overlay .primary { background: var(--accent); color: #111; border-color: var(--accent); }
+.overlay .primary:hover { background: var(--fg); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Shop ---------- */
+.shop-body {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.theme-card {
+  border-radius: 12px;
+  border: 1px solid #ffffff1a;
+  padding: 14px;
+  background: #0b0e13;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.theme-swatch {
+  height: 68px;
+  border-radius: 8px;
+  display: flex;
+}
+.theme-swatch span { flex: 1; }
+.theme-name { font-weight: 700; }
+.theme-cost { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+.theme-card button {
+  font-family: var(--ui);
+  background: #ffffff14;
+  color: var(--fg);
+  border: 1px solid #ffffff22;
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.theme-card button:disabled { opacity: .5; cursor: not-allowed; }
+.theme-card button.active { background: var(--accent); color: #111; border-color: var(--accent); }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #ffffff14; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #ffffff28; }
