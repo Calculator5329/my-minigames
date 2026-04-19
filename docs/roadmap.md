@@ -10,18 +10,18 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 ### Shipped (27)
 - [x] Gullet
 - [x] **Franchise Frenzy** — *expanded into 5-city campaign + Stardollar meta-shop on 2026-04-19*
-- [x] Ricochet
+- [x] **Ricochet** — *deepened with predictive aim, combo system, portals, boss phase 2, post-shot summary on 2026-04-19*
 - [x] Skybound
 - [x] Deflect
 - [x] Bloom
 - [x] Sigil
-- [x] Barrage
+- [x] **Barrage** — *anti-spam pass: per-wave ammo + fire cooldown on 2026-04-19*
 - [x] Diner Rush
 - [x] Stargazer
 - [x] Tanks
 - [x] Bulwark
 - [x] Starfall
-- [x] Leap
+- [x] **Leap** — *campaign closed (12 levels), enemy variety + power-ups + boss attack pattern on 2026-04-19*
 - [x] Crypt
 - [x] Depths
 - [x] Vaultbreaker
@@ -112,8 +112,22 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
           service worker, install prompt). Replaces the older
           standalone "build pipeline" item.
 - [ ] Next-tier depth pass (the ones that haven't gotten one yet): Tanks
-      single-screen battles, Skybound endless runner, Barrage simple shooter,
-      Switchboard nights pass.
+      single-screen battles, Barrage simple shooter.
+- [x] **418 Linden (Switchboard) — script + voice creep pass (2026-04-19)**
+      — see `docs/changelog.md`. Rewrote dialogue + walkthrough across all
+      five nights (more callers, two new voices, longer Night 5 figures).
+      Replaced raw audio playback with a Web Audio chain (telephone
+      bandpass + tube distortion + reverb + per-call hiss/breath/crackle
+      bed) keyed to a per-night `escalation` 0..1, so each night narrows
+      the band, raises the noise floor, and pushes the wet mix. Atmosphere
+      pass on the board (palette lerp, ghost lamps, scanlines, static
+      flashes, swaying cables) and the walkthrough (candle flicker, dust
+      motes, figures that turn to watch the player). Tightened nights.js
+      tuning (shorter TTL, ringing-drain, doubled critical-route penalty).
+      `scripts/generate-voices.js` reads per-character `direction` notes
+      and bakes via OpenRouter (`openai/gpt-audio-mini`, pcm16 streaming
+      wrapped to WAV). Full 108-line bake committed to
+      `assets/switchboard/voices/` (~38MB).
 - [x] **Orbital — expansion Phase 1 + Phase 2 (2026-04-19)** — shipped per
       `docs/plans/2026-04-19-orbital-expansion.md`. Split monolithic
       `game.js` into `data/`, `lib/`, `ui/` modules under a new
@@ -137,13 +151,20 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
       badge → T3 chevron spikes / cardinal star + orbiting plate → T4
       pulsing aura with rotating spoke ring, counter-rotating dashed ring,
       orbiting energy beads, and crowning lance/gem glyph).
+- [x] **Orbital — end-of-run + freeplay (2026-04-19)** — full canvas
+      end-of-run modal (per-run stats: kills, bosses, leaks, lives lost,
+      cash earned/spent, best combo, run duration), persistent top-10
+      leaderboard with rank highlight, and "Continue in Freeplay" button
+      on R50 victory. Freeplay extends rounds past 50 indefinitely with
+      HP × 1.20^level / bounty × 1.10^level scaling per round past 50,
+      stacked on the existing endless-tail wave-count growth.
 - [ ] **Orbital — expansion Phase 3 (maps + difficulty)** — three new map
       geometries (branching, double-loop, choke-point), Hard + Apocalypse
       difficulties with mod-density and HP scalars per-act.
 - [ ] **Orbital — expansion Phase 4 (heroes + meta)** — three heroes with
       level curves and ult abilities, Star Charts persistent skill tree
-      spending Stardust, Endless mode after R50, rotating daily challenge,
-      sandbox map.
+      spending Stardust, ~~Endless mode after R50~~ (shipped), rotating
+      daily challenge, sandbox map.
 
 ## Decision log
 - **Static, no build** — keep the project hackable from any folder. New games slot in by adding two `<script>` tags. Don't add a bundler unless game count crosses ~50.

@@ -66,7 +66,7 @@
       base: {
         name: 'Plasma Cannon', short: 'Cannon', cost: 450,
         sprite: 'orb_turret_cannon', color: '#ffb347',
-        range: 155, fireRate: 0.9, dmg: 6, splash: 40,
+        range: 155, fireRate: 1.0, dmg: 8, splash: 50,
         projSpeed: 380, proj: 'plasma', priority: 'first',
         desc: 'Slow, heavy plasma rounds with area damage.'
       },
@@ -74,12 +74,12 @@
         A: {
           id: 'ordnance', name: 'Heavy Ordnance', accent: '#ff5530',
           tiers: [
-            { cost:  300, label: 'Bigger Shells', desc: '+3 dmg, +10 splash',
-              glyph: 'dmg', patch: { dmg: 9, splash: 50 } },
-            { cost:  550, label: 'Reinforced Barrel', desc: '+5 dmg, +12 splash',
-              glyph: 'splash', patch: { dmg: 14, splash: 62 } },
-            { cost: 1100, label: 'Earthshaker', desc: '+8 dmg, +20 splash, +20% rate',
-              glyph: 'splash', patch: { dmg: 22, splash: 82, fireRate: 1.1 } },
+            { cost:  300, label: 'Bigger Shells', desc: '+4 dmg, +10 splash',
+              glyph: 'dmg', patch: { dmg: 12, splash: 60 } },
+            { cost:  550, label: 'Reinforced Barrel', desc: '+5 dmg, +15 splash',
+              glyph: 'splash', patch: { dmg: 17, splash: 75 } },
+            { cost: 1100, label: 'Earthshaker', desc: '+9 dmg, +20 splash, +20% rate',
+              glyph: 'splash', patch: { dmg: 26, splash: 95, fireRate: 1.2 } },
             { cost: 3200, label: 'Carpet Bomb', desc: 'massive shells; ability',
               glyph: 'nuke', patch: { dmg: 38, splash: 110, fireRate: 1.2 },
               ability: 'carpetBomb' }
@@ -104,20 +104,20 @@
 
     // ======== BEAM ARRAY — armor breaker ========
     beam: {
-      unlock: { round: 4 },
+      unlock: { round: 3 },
       base: {
         name: 'Beam Array', short: 'Beam', cost: 700,
         sprite: 'orb_turret_beam', color: '#ff4fd8',
         range: 185, fireRate: 0, dmg: 0, beamDps: 32,
         proj: 'beam', priority: 'first',
-        desc: 'Continuous beam that pierces armor. Great vs lead.'
+        desc: 'Continuous beam that pierces armor. Great vs lead. Path A reveals camo.'
       },
       paths: {
         A: {
           id: 'fractal', name: 'Fractal Beam', accent: '#ff4fd8',
           tiers: [
-            { cost:  300, label: 'Wider Aperture', desc: '+16 dps',
-              glyph: 'dmg', patch: { beamDps: 48 } },
+            { cost:  300, label: 'Wider Aperture', desc: '+16 dps; reveals camo',
+              glyph: 'eye', patch: { beamDps: 48, seesCamo: true } },
             { cost:  650, label: 'Chaining',       desc: 'chains to 2 enemies',
               glyph: 'chain', patch: { chain: 2 } },
             { cost: 1400, label: 'Tri-Beam',       desc: 'chains to 3, +dps',
@@ -146,7 +146,7 @@
 
     // ======== GRAVITY WELL — controller ========
     gravity: {
-      unlock: { round: 2 },
+      unlock: { round: 5 },
       base: {
         name: 'Gravity Well', short: 'Gravity', cost: 600,
         sprite: 'orb_turret_gravity', color: '#b890ff',
@@ -188,20 +188,20 @@
 
     // ======== SOLAR FLARE — DoT ========
     flare: {
-      unlock: { round: 7 },
+      unlock: { round: 12 },
       base: {
-        name: 'Solar Flare', short: 'Flare', cost: 1200,
+        name: 'Solar Flare', short: 'Flare', cost: 1000,
         sprite: 'orb_turret_flare', color: '#ffd86b',
         range: 155, fireRate: 0, dmg: 0,
-        pulseCD: 3.0, pulseDmg: 22, proj: 'pulse', priority: 'first',
-        desc: 'Periodic radial pulses. Ignites burns. Hits lead.'
+        pulseCD: 3.0, pulseDmg: 28, proj: 'pulse', priority: 'first',
+        desc: 'Periodic radial pulses. Ignites burns. Hits lead and camo.'
       },
       paths: {
         A: {
           id: 'corona', name: 'Coronal Mass', accent: '#ff8040',
           tiers: [
             { cost:  500, label: 'Bigger Pulse', desc: '+10 pulse damage',
-              glyph: 'splash', patch: { pulseDmg: 32 } },
+              glyph: 'splash', patch: { pulseDmg: 38 } },
             { cost:  900, label: 'Hotter Burns', desc: 'leaves 8 dps burn',
               glyph: 'burn', patch: { burnDps: 8 } },
             { cost: 1700, label: 'CME',          desc: 'faster pulse, big dmg',
@@ -230,9 +230,9 @@
 
     // ======== SINGULARITY — panic button ========
     sing: {
-      unlock: { round: 22 },
+      unlock: { round: 40 },
       base: {
-        name: 'Singularity', short: 'Sing', cost: 3000,
+        name: 'Singularity', short: 'Sing', cost: 2400,
         sprite: 'orb_turret_sing', color: '#a070ff',
         range: 100, fireRate: 0, dmg: 0,
         collapseCD: 10.0, collapseRadius: 90,
@@ -273,21 +273,21 @@
 
     // ======== TESLA COIL — swarm killer ========
     tesla: {
-      unlock: { round: 5 },
+      unlock: { round: 7 },
       base: {
         name: 'Tesla Coil', short: 'Tesla', cost: 850,
         sprite: 'orb_turret_tesla', color: '#7aaaff',
         range: 150, fireRate: 1.5, dmg: 0,
         chainCount: 3, chainDmg: 8, chainRadius: 70,
         proj: 'arc', priority: 'first',
-        desc: 'Arcs lightning between nearby enemies. Anti-swarm.'
+        desc: 'Arcs lightning between nearby enemies. Anti-swarm. Path A ionizes camo.'
       },
       paths: {
         A: {
           id: 'super', name: 'Superconductor', accent: '#7aaaff',
           tiers: [
-            { cost:  450, label: 'More Chains',  desc: 'chain to 5',
-              glyph: 'chain', patch: { chainCount: 5 } },
+            { cost:  450, label: 'More Chains',  desc: 'chain to 5; reveals camo',
+              glyph: 'eye', patch: { chainCount: 5, seesCamo: true } },
             { cost:  800, label: 'High Voltage', desc: '+8 chain dmg',
               glyph: 'dmg', patch: { chainDmg: 16 } },
             { cost: 1600, label: 'Tesla Net',    desc: 'wider radius, faster',
@@ -316,7 +316,7 @@
 
     // ======== MISSILE SILO — boss melter ========
     missile: {
-      unlock: { round: 12 },
+      unlock: { round: 23 },
       base: {
         name: 'Missile Silo', short: 'Missile', cost: 1500,
         sprite: 'orb_turret_missile', color: '#ff6060',
@@ -358,7 +358,7 @@
 
     // ======== SUPPORT BEACON — buffer ========
     support: {
-      unlock: { round: 10 },
+      unlock: { round: 20 },
       base: {
         name: 'Support Beacon', short: 'Support', cost: 900,
         sprite: 'orb_turret_support', color: '#4ade80',
@@ -385,7 +385,7 @@
         B: {
           id: 'tactical', name: 'Tactical Net', accent: '#7ae0ff',
           tiers: [
-            { cost:  500, label: 'Eye in the Sky', desc: 'sees camo in range',
+            { cost:  500, label: 'Eye in the Sky', desc: 'reveals camo in range; +10% rate',
               glyph: 'eye', patch: { seesCamo: true, buffFire: 0.10 } },
             { cost:  900, label: 'Bounty Tag',  desc: '+15% bounty in range',
               glyph: 'money', patch: { bountyMult: 0.15 } },
@@ -401,7 +401,7 @@
 
     // ======== QUANT ADVISOR — economist ========
     quant: {
-      unlock: { round: 14 },
+      unlock: { round: 26 },
       base: {
         name: 'Quant Advisor', short: 'Quant', cost: 800,
         sprite: 'orb_turret_quant', color: '#ffd86b',
@@ -446,20 +446,20 @@
 
     // ======== SNIPER PLATFORM — global single-shot ========
     sniper: {
-      unlock: { round: 8 },
+      unlock: { round: 14 },
       base: {
         name: 'Sniper Platform', short: 'Sniper', cost: 700,
         sprite: 'orb_turret_sniper', color: '#9aa6c0',
         range: 9999, fireRate: 0.5, dmg: 18, antiArmor: true,
         projSpeed: 1400, proj: 'rail', priority: 'strong',
-        desc: 'Global range. Hits one target hard. Sees through armor.'
+        desc: 'Global range. Hits one target hard. Sees through armor. Path A reveals camo.'
       },
       paths: {
         A: {
           id: 'recon', name: 'Recon Net', accent: '#7ae0ff',
           tiers: [
-            { cost:  450, label: 'Spotter',     desc: 'kills give +30% bounty 5s',
-              glyph: 'eye', patch: { spotterBuff: 0.30 } },
+            { cost:  450, label: 'Spotter',     desc: 'reveals camo; +30% bounty 5s on kill',
+              glyph: 'eye', patch: { spotterBuff: 0.30, seesCamo: true } },
             { cost:  900, label: 'Rangefinder', desc: '+10 dmg',
               glyph: 'crit', patch: { dmg: 28 } },
             { cost: 1700, label: 'Tag Target',  desc: 'tagged enemies take +50% dmg',
@@ -488,13 +488,13 @@
 
     // ======== ENGINEER STATION — mines + sentry ========
     engineer: {
-      unlock: { round: 16 },
+      unlock: { round: 29 },
       base: {
         name: 'Engineer Station', short: 'Engineer', cost: 950,
         sprite: 'orb_turret_engineer', color: '#a87a40',
-        range: 110, fireRate: 1.5, dmg: 4,
+        range: 120, fireRate: 1.8, dmg: 6,
         projSpeed: 360, proj: 'bolt', priority: 'first',
-        mineCD: 6, mineDmg: 25, mineRadius: 50, mineDrops: true,
+        mineCD: 5, mineDmg: 35, mineRadius: 55, mineDrops: true,
         desc: 'Drops mines on the path. Sentry fires bolts.'
       },
       paths: {
@@ -516,7 +516,7 @@
           id: 'sentry', name: 'Auto-Sentry', accent: '#7ae0ff',
           tiers: [
             { cost:  500, label: 'Stronger Sentry', desc: '+4 dmg, +1 rate',
-              glyph: 'dmg', patch: { dmg: 8, fireRate: 2.5 } },
+              glyph: 'dmg', patch: { dmg: 10, fireRate: 2.8 } },
             { cost:  900, label: 'Twin Barrels', desc: 'fires 2 bolts per shot',
               glyph: 'burst', patch: { multiShot: 2 } },
             { cost: 1700, label: 'Quick Hands', desc: '+1.5 fire rate',
@@ -531,11 +531,11 @@
 
     // ======== CRYO STATION — freeze ========
     cryo: {
-      unlock: { round: 6 },
+      unlock: { round: 9 },
       base: {
         name: 'Cryo Station', short: 'Cryo', cost: 800,
         sprite: 'orb_turret_cryo', color: '#a8e8ff',
-        range: 130, fireRate: 1.8, dmg: 1,
+        range: 130, fireRate: 1.8, dmg: 2,
         projSpeed: 380, proj: 'frost', priority: 'first',
         freezeAmount: 0.55, freezeDuration: 2.0, brittleMul: 1.5,
         desc: 'Slows enemies to a crawl. Brittle targets take +50% dmg.'
@@ -574,13 +574,13 @@
 
     // ======== MORTAR — long-arc heavy artillery ========
     mortar: {
-      unlock: { round: 11 },
+      unlock: { round: 17 },
       base: {
         name: 'Mortar Battery', short: 'Mortar', cost: 1100,
         sprite: 'orb_turret_mortar', color: '#c8945a',
         range: 220, fireRate: 0.5, dmg: 28, splash: 75,
         projSpeed: 280, proj: 'plasma', priority: 'strong',
-        desc: 'Lobs heavy shells at high arcs. Big splash, long range.'
+        desc: 'Lobs heavy HE shells at high arcs. Big splash, long range. Hits lead.'
       },
       paths: {
         A: {
@@ -616,11 +616,11 @@
 
     // ======== CRYSTAL PRISM — piercing prismatic bolts ========
     crystal: {
-      unlock: { round: 17 },
+      unlock: { round: 32 },
       base: {
         name: 'Crystal Prism', short: 'Crystal', cost: 1300,
         sprite: 'orb_turret_crystal', color: '#ff80c8',
-        range: 175, fireRate: 1.4, dmg: 16, pierce: 5,
+        range: 180, fireRate: 1.6, dmg: 22, pierce: 5,
         projSpeed: 620, proj: 'bolt', priority: 'first',
         desc: 'Refracted prism bolts pierce many enemies in a line.'
       },
@@ -628,10 +628,10 @@
         A: {
           id: 'refract', name: 'Refraction', accent: '#ff80c8',
           tiers: [
-            { cost:  600, label: 'Sharper Facets', desc: '+8 dmg, +2 pierce',
-              glyph: 'pierce', patch: { dmg: 24, pierce: 7 } },
-            { cost: 1100, label: 'Hyper Crystal', desc: '+12 dmg, +0.5 rate',
-              glyph: 'dmg', patch: { dmg: 36, fireRate: 1.9 } },
+            { cost:  600, label: 'Sharper Facets', desc: '+10 dmg, +2 pierce',
+              glyph: 'pierce', patch: { dmg: 32, pierce: 7 } },
+            { cost: 1100, label: 'Hyper Crystal', desc: '+14 dmg, +0.4 rate',
+              glyph: 'dmg', patch: { dmg: 46, fireRate: 2.0 } },
             { cost: 1900, label: 'Spectrum Split', desc: 'fires 3 prism bolts',
               glyph: 'burst', patch: { multiShot: 3, spread: 0.22, pierce: 9 } },
             { cost: 4500, label: 'Rainbow Lance', desc: 'pierces ALL; ability',
@@ -658,7 +658,7 @@
 
     // ======== CHRONO FIELD — slow + tower buff ========
     chrono: {
-      unlock: { round: 19 },
+      unlock: { round: 36 },
       base: {
         name: 'Chrono Field', short: 'Chrono', cost: 1100,
         sprite: 'orb_turret_chrono', color: '#c8a8ff',
@@ -711,6 +711,21 @@
   function isUnlocked(k, bestRound) {
     return unlockRound(k) <= (bestRound | 0);
   }
+  // True if the tower's base or any tier in any path grants seesCamo.
+  // Used by the side panel to mark which towers can deal with camo enemies.
+  function hasCamoDetection(k) {
+    const t = TOWERS[k];
+    if (!t) return false;
+    if (t.base && t.base.seesCamo) return true;
+    for (const p of ['A', 'B']) {
+      const path = t.paths && t.paths[p];
+      if (!path) continue;
+      for (const tier of (path.tiers || [])) {
+        if (tier.patch && tier.patch.seesCamo) return true;
+      }
+    }
+    return false;
+  }
 
-  O.Towers = { catalog: TOWERS, keys, get, base, unlockRound, isUnlocked };
+  O.Towers = { catalog: TOWERS, keys, get, base, unlockRound, isUnlocked, hasCamoDetection };
 })();

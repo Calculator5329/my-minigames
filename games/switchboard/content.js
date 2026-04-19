@@ -185,7 +185,7 @@
       durationSec: 330,
       ambientPitch: 1.0,
       directory: 'n1',
-      intro: 'NIGHT ONE\n\nRoute the calls. Don\'t keep them waiting.',
+      intro: 'NIGHT ONE\n\nYou are the night operator at the 418 Linden Exchange.\nLines light up. You answer them. You connect them.\n\nWhen a lamp glows: click it to pick up.\nHold [L] to lean into the receiver and hear what they want.\nDrag a cable from their INCOMING socket down to the OUTGOING socket\nthat matches the name in the directory on your right.\n\nDon\'t keep them waiting.',
       calls: [
         { at: 4,   voice: 'grocer',    request: 'Abbott Grocers',
           text: 'Abbott Grocers. Order for Mrs. Halberd? Got her tea in. Earl Grey.' },

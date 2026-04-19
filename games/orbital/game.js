@@ -89,7 +89,7 @@
       this.maxRound = O.Rounds.count();
       this.round = 0;
       this.cash = 850;
-      this.lives = 120;
+      this.lives = 150;
       this.state2 = 'build';      // 'build' | 'wave'
       this.enemies = [];
       this.projectiles = [];
@@ -116,12 +116,41 @@
       // so anything cleared this run is immediately playable next round.
       this.bestRound = (O.Persist && O.Persist.getBestRound()) | 0;
       this.unlockToast = null;        // { name, t } floating banner
+      this.camoIntro = null;          // { towers, t } first-camo tutorial banner
+      // Show the camo intro once per save: if the player has already been
+      // taught about camo before, don't trigger it again.
+      this._camoIntroShown = !!(O.Persist && O.Persist.hasSeenHint
+                                && O.Persist.hasSeenHint('camo'));
       // Streak tracking for round-bonus
       this.leakedThisRound = false;
       this.noLeakStreak = 0;
       this.longestCombo = 0;
       this._comboCount = 0;
       this._comboT = 0;
+      this.roundsClearedThisRun = 0;
+      // Mode + freeplay state. Campaign runs the hand-tuned R1-R50 wave list;
+      // freeplay is unlocked when R50 is cleared and the player picks
+      // "Continue" — rounds keep going past 50 with HP/bounty scaling per
+      // freeplay level (see _spawnEnemyScale / cullEnemies).
+      this.mode = 'campaign';                 // 'campaign' | 'freeplay'
+      this.freeplayLevel = 0;
+      this.victoryAchieved = false;
+      // Per-run aggregate stats — surfaced in the end-of-run modal and
+      // mirrored into lifetime stats via Persist.recordLifetimeStats().
+      this.stats = {
+        kills: 0, bossKills: 0, leaks: 0,
+        livesLost: 0, totalSpent: 0, cashEarned: 0,
+        bestCombo: 0
+      };
+      // End-of-run modal state. While non-null, gameplay is frozen and the
+      // EndScreen UI takes over click handling.
+      this.endScreen = null;
+      // Wire end-screen action callbacks (used by ui/end-screen.js buttons).
+      O._endActions = {
+        continueFreeplay: () => this._continueFreeplay(),
+        playAgain:        () => { O.UI.EndScreen.dismiss(this); this.begin(); },
+        quit:             () => this._quitFromEnd()
+      };
       this.sfx = this.makeSfx({
         pop:   { freq: 440, type: 'triangle', dur: 0.06, vol: 0.25 },
         boom:  { freq: 120, type: 'noise',    dur: 0.25, vol: 0.45, filter: 'lowpass' },
@@ -155,6 +184,10 @@
     }
 
     handleClick(mx, my) {
+      // End-of-run modal owns input while it's up.
+      if (this.endScreen && O.UI.EndScreen) {
+        if (O.UI.EndScreen.handleClick(mx, my, this)) return;
+      }
       // Side panel claims the right rail (everything in panel.x..W).
       if (O.UI.SidePanel.handleClick(mx, my, this)) return;
       // Otherwise: in the play area
@@ -245,8 +278,16 @@
     // -------------------------------------------------------------
     startWave() {
       if (this.state2 !== 'build') return;
-      if (this.round >= this.maxRound) return;
+      // Campaign mode caps at maxRound. Freeplay mode keeps incrementing
+      // the round counter forever; data/rounds.js's get() already returns
+      // a scaled-up version of the last hand-tuned round for indices past
+      // the campaign length, and spawnEnemy applies HP/bounty scaling on
+      // top of that based on this.freeplayLevel.
+      if (this.mode === 'campaign' && this.round >= this.maxRound) return;
       this.round++;
+      if (this.mode === 'freeplay') {
+        this.freeplayLevel = this.round - this.maxRound;
+      }
       this.state2 = 'wave';
       this.waveTimer = 0;
       this.leakedThisRound = false;
@@ -313,15 +354,18 @@
       // Stardust accrues from score earned this run; recompute total.
       const s = O.Economy.stardustFromScore(this.score);
       this.runStardust = s;
-      if (this.round >= this.maxRound) {
+      // R50 clear in CAMPAIGN mode → show the victory/end-screen modal,
+      // which also offers to continue in freeplay. We don't call win() here
+      // because that flips state to 'won' immediately and hands control to
+      // the shell — instead the modal owns the decision.
+      if (this.mode === 'campaign' && this.round >= this.maxRound && !this.endScreen) {
         this.sfx.play('win');
         this.flash('#7ae0ff', 0.4);
         if (O.Persist) {
-          O.Persist.recordRunEnd(this.round);
           O.Persist.addStardust(this.runStardust);
         }
         this.victoryAchieved = true;
-        this.win();
+        this._showEndScreen('victory');
       }
     }
 
@@ -330,8 +374,55 @@
       if (this.messages.length > 3) this.messages.shift();
     }
 
+    // First-camo tutorial: snapshot which towers can deal with camo, mark
+    // the hint as seen in persistent storage, and pop a long-lived banner.
+    _showCamoIntro() {
+      const towers = O.Towers.keys()
+        .filter(k => O.Towers.hasCamoDetection && O.Towers.hasCamoDetection(k))
+        .map(k => O.Towers.base(k).short || O.Towers.base(k).name);
+      this.camoIntro = { towers, t: 8.0 };
+      this.flashMessage('CAMO incoming — only certain towers can hit them!', '#7ae0ff');
+      if (O.Persist && O.Persist.markHintSeen) O.Persist.markHintSeen('camo');
+      if (this.sfx) this.sfx.play('lose');
+    }
+
     spendCash(amt) {
       this.cash = Math.max(0, this.cash - amt);
+      if (this.stats) this.stats.totalSpent += (amt | 0);
+    }
+
+    // ---- End-of-run flow ----------------------------------------------
+    // Called from the EndScreen "Continue in Freeplay" button. Switches the
+    // run into freeplay mode WITHOUT resetting cash, lives, or towers, and
+    // dismisses the modal so the player can keep building/starting waves.
+    _continueFreeplay() {
+      if (!this.endScreen) return;
+      O.UI.EndScreen.dismiss(this);
+      this.mode = 'freeplay';
+      this.freeplayLevel = Math.max(0, this.round - this.maxRound);
+      this.victoryAchieved = true;
+      this.flashMessage('FREEPLAY UNLOCKED — difficulty scaling per round',
+        '#ff9055');
+      // Top up some lives as a reward for the win, capped, so the player
+      // can actually try freeplay rather than dying immediately.
+      this.lives = Math.max(this.lives, 80);
+    }
+
+    // Called from the EndScreen "Quit" button. Flips the BaseGame state to
+    // 'won' or 'over' so the shell's end overlay (in main.js) takes over.
+    _quitFromEnd() {
+      const kind = this.endScreen && this.endScreen.kind;
+      O.UI.EndScreen.dismiss(this);
+      if (kind === 'victory') this.win();
+      else this.gameOver();
+    }
+
+    // Build a snapshot for end-of-run reporting + leaderboard. Called by
+    // EndScreen.show via game.endScreen passthrough.
+    _showEndScreen(kind) {
+      if (this.endScreen) return;
+      // Snapshot current stats for the modal.
+      O.UI.EndScreen.show(this, kind);
     }
 
     spawnFloater(x, y, text, color) {
@@ -351,9 +442,17 @@
     spawnEnemy(tier, mods) {
       const spec = O.Enemies.get(tier);
       if (!spec) return null;
+      // Freeplay scaling: HP grows faster than bounty so each round past
+      // R50 is meaningfully harder while still letting the player keep
+      // upgrading. fpL=0 → ×1 / ×1, fpL=5 → ×2.5 hp / ×1.6 bounty,
+      // fpL=10 → ×6.2 hp / ×2.6 bounty, fpL=20 → ×38 hp / ×6.7 bounty.
+      const fpL = (this.mode === 'freeplay') ? Math.max(0, this.freeplayLevel | 0) : 0;
+      const hpScale = fpL > 0 ? Math.pow(1.20, fpL) : 1;
+      const bountyScale = fpL > 0 ? Math.pow(1.10, fpL) : 1;
+      const startHp = Math.round(spec.hp * hpScale);
       const e = {
         tier, spec, mods: (mods || []).slice(),
-        hp: spec.hp, maxHp: spec.hp,
+        hp: startHp, maxHp: startHp,
         speed: spec.speed,
         size: spec.size,
         pathS: 0,
@@ -365,11 +464,18 @@
         brittleT: 0, brittleMul: 1,
         lastDamagedT: -999, spawnT: this.time,
         boss: !!spec.boss, _summonT: 0,
-        _bountyMul: 1
+        _bountyMul: 1, _bountyScale: bountyScale
       };
       O.EnemyMods.applyAll(e, e.mods);
       if (spec.boss) e.boss = true;
       this.enemies.push(e);
+      // First-camo intro: when the player first sees a camo enemy in this run
+      // (and hasn't been shown the hint before across the save), pop a banner
+      // listing the tower options that can deal with them.
+      if (e.camo && !this._camoIntroShown) {
+        this._camoIntroShown = true;
+        this._showCamoIntro();
+      }
       return e;
     }
 
@@ -396,6 +502,13 @@
 
       // mouse position (UI uses raw real-time)
       this._mx = Input.mouse.x; this._my = Input.mouse.y;
+
+      // End-of-run modal: freeze gameplay, but keep input + cursor flow.
+      if (this.endScreen) {
+        if (Input.mouse.justPressed) this.handleClick(this._mx, this._my);
+        return;
+      }
+
       O.UI.SidePanel.handleHover(this._mx, this._my, this);
 
       // Star twinkle
@@ -410,6 +523,10 @@
       if (this.unlockToast) {
         this.unlockToast.t -= rdt;
         if (this.unlockToast.t <= 0) this.unlockToast = null;
+      }
+      if (this.camoIntro) {
+        this.camoIntro.t -= rdt;
+        if (this.camoIntro.t <= 0) this.camoIntro = null;
       }
       O.UI.Recap.tick(rdt);
 
@@ -429,9 +546,20 @@
       for (const e of this.enemies) this.updateEnemy(e, sdt);
       // Towers
       for (const t of this.towers) this.updateTower(t, sdt);
-      // Projectiles
+      // Projectiles. In-place compact (swap-and-pop) avoids allocating a
+      // fresh array every frame — the projectile list can hold 60+ items
+      // for many seconds at a time, and .filter() was the largest single
+      // GC source in the update loop.
       for (const p of this.projectiles) this.updateProjectile(p, sdt);
-      this.projectiles = this.projectiles.filter(p => !p.dead);
+      {
+        const list = this.projectiles;
+        let n = list.length;
+        for (let i = 0; i < n; ) {
+          if (list[i].dead) { list[i] = list[n - 1]; n--; }
+          else i++;
+        }
+        list.length = n;
+      }
       // Cull / bounty
       this.cullEnemies();
       // Wave end
@@ -440,15 +568,14 @@
         this.onRoundClear();
         if (this.round < this.maxRound) this.flashMessage('Round clear', '#7ae0ff');
       }
-      // Lives out
-      if (this.lives <= 0 && this.state !== 'over') {
+      // Lives out → show end-of-run modal instead of immediately calling
+      // gameOver(). The modal lets the player view their stats + leaderboard
+      // before the shell's overlay takes over.
+      if (this.lives <= 0 && !this.endScreen && this.state !== 'over') {
         this.lives = 0;
-        if (O.Persist) {
-          O.Persist.recordRunEnd(this.round);
-          O.Persist.addStardust(this.runStardust);
-        }
+        if (O.Persist) O.Persist.addStardust(this.runStardust);
         this.sfx.play('lose');
-        this.gameOver();
+        this._showEndScreen(this.mode === 'freeplay' ? 'freeplay' : 'defeat');
       }
       // Hover preview
       this.hoverPlace = null;
@@ -526,6 +653,7 @@
         this._comboT -= rdt;
         if (this._comboT <= 0) {
           if (this._comboCount > this.longestCombo) this.longestCombo = this._comboCount;
+          if (this._comboCount > (this.stats.bestCombo | 0)) this.stats.bestCombo = this._comboCount;
           this._comboCount = 0;
         }
       }
@@ -572,6 +700,9 @@
       slowAmt = Math.min(0.95, slowAmt);
       const moveDt = dt * dtScale * (1 - slowAmt);
 
+      // Cache effective per-second speed along the path so towers can lead the target.
+      e._vEff = e.speed * dtScale * (1 - slowAmt);
+
       e.pathS += e.speed * moveDt;
       const p = pointAt(e.pathS);
       e.x = p.x; e.y = p.y; e.angle = p.angle;
@@ -599,11 +730,24 @@
           }
         }
       }
-      // Path complete -> leak
+      // Path complete -> leak. Damage scales with enemy difficulty (set per
+      // tier in data/enemies.js). Show a red floater so the player sees
+      // exactly how much that leak cost — bigger enemies = bigger sting.
       if (p.done) {
-        this.lives -= e.spec.dmg || 1;
-        this.shake(6, 0.2); this.flash('#ff5566', 0.08);
+        const leakDmg = e.spec.dmg || 1;
+        this.lives -= leakDmg;
+        this.shake(Math.min(14, 4 + leakDmg * 0.4), 0.2);
+        this.flash('#ff5566', Math.min(0.25, 0.05 + leakDmg * 0.01));
         this.sfx.play('boom');
+        // Floater near the exit — color/size emphasize big leaks.
+        const floaterColor = leakDmg >= 10 ? '#ff5566'
+                           : leakDmg >= 5  ? '#ff8866'
+                                           : '#ffaa88';
+        this.spawnFloater(e.x, e.y - 20, '-' + leakDmg + ' ♥', floaterColor);
+        if (this.stats) {
+          this.stats.leaks++;
+          this.stats.livesLost += leakDmg;
+        }
         e.dead = true;
         e.leaked = true;
         this.leakedThisRound = true;
@@ -794,12 +938,14 @@
           O.XP.grant(t, st.chainDmg);
           t._arcTargets.push({ x: current.x, y: current.y });
           hit.add(current);
-          let nearest = null, nd = st.chainRadius || 70;
+          let nearest = null;
+          let nd2 = (st.chainRadius || 70) * (st.chainRadius || 70);
           for (const e of this.enemies) {
             if (hit.has(e)) continue;
             if (!O.EnemyMods.isVisibleTo(e, t)) continue;
-            const d = Math.hypot(e.x - current.x, e.y - current.y);
-            if (d < nd) { nd = d; nearest = e; }
+            const dx = e.x - current.x, dy = e.y - current.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < nd2) { nd2 = d2; nearest = e; }
           }
           current = nearest;
           count++;
@@ -830,11 +976,12 @@
         let last = target;
         const hit = new Set([target]);
         for (let c = 0; c < st.chain; c++) {
-          let near = null, nd = 90;
+          let near = null, nd2 = 90 * 90;
           for (const e of this.enemies) {
             if (hit.has(e)) continue;
-            const d = Math.hypot(e.x - last.x, e.y - last.y);
-            if (d < nd) { nd = d; near = e; }
+            const dx = e.x - last.x, dy = e.y - last.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < nd2) { nd2 = d2; near = e; }
           }
           if (!near) break;
           this.damage(near, dmg * 0.6, 'beam');
@@ -853,9 +1000,10 @@
 
     _updateGravity(t, buffs, dt) {
       const st = t.stats;
+      const r2 = st.range * st.range;
       for (const e of this.enemies) {
-        const d = Math.hypot(e.x - t.x, e.y - t.y);
-        if (d > st.range) continue;
+        const dx = e.x - t.x, dy = e.y - t.y;
+        if (dx * dx + dy * dy > r2) continue;
         e.slow = Math.max(e.slow, st.slow || 0.5);
         if (st.pullDps) {
           this.damage(e, st.pullDps * buffs.dmgMul * dt, 'gravity');
@@ -867,7 +1015,8 @@
           if (t._stunCd <= 0) {
             t._stunCd = st.stunPulse.every;
             for (const e2 of this.enemies) {
-              if (Math.hypot(e2.x - t.x, e2.y - t.y) > st.range) continue;
+              const dx2 = e2.x - t.x, dy2 = e2.y - t.y;
+              if (dx2 * dx2 + dy2 * dy2 > r2) continue;
               if (e2.spec.stunResist && !st.stunPulse.evenUfo) continue;
               e2.stunUntil = Math.max(e2.stunUntil || 0, this.time + st.stunPulse.dur);
             }
@@ -882,13 +1031,14 @@
       // Lance mode (B path)
       if (st.lance) {
         const cone = st.lance.cone, dps = st.lance.dps;
+        const r2 = st.range * st.range;
         // Sweep angle slowly
         t._sweep = ((t._sweep || 0) + dt * 1.4) % (Math.PI * 2);
         const aim = t._sweep;
         for (const e of this.enemies) {
-          const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d > st.range) continue;
-          const ang = Math.atan2(e.y - t.y, e.x - t.x);
+          const dx = e.x - t.x, dy = e.y - t.y;
+          if (dx * dx + dy * dy > r2) continue;
+          const ang = Math.atan2(dy, dx);
           let da = Math.abs(ang - aim);
           if (da > Math.PI) da = Math.PI * 2 - da;
           if (da <= cone / 2) {
@@ -907,9 +1057,10 @@
         t._pulseAnim = 0.6;
         this.shake(3, 0.1);
         this.sfx.play('boom');
+        const r2 = st.range * st.range;
         for (const e of this.enemies) {
-          const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= st.range) {
+          const dx = e.x - t.x, dy = e.y - t.y;
+          if (dx * dx + dy * dy <= r2) {
             const dmg = (st.pulseDmg || 22) * buffs.dmgMul;
             this.damage(e, dmg, 'flare');
             O.XP.grant(t, dmg * 0.5);
@@ -931,9 +1082,10 @@
         t._collapseAnim = 0.9;
         this.shake(10, 0.4); this.flash('#a070ff', 0.15);
         this.sfx.play('sing');
+        const r2 = st.collapseRadius * st.collapseRadius;
         for (const e of this.enemies) {
-          const d = Math.hypot(e.x - t.x, e.y - t.y);
-          if (d <= st.collapseRadius) {
+          const dx = e.x - t.x, dy = e.y - t.y;
+          if (dx * dx + dy * dy <= r2) {
             if (e.boss) {
               this.damage(e, st.bossDmg || 400, 'sing');
             } else {
@@ -950,8 +1102,6 @@
     // -------------------------------------------------------------
     fireProjectile(t, target, buffs, angOffset) {
       const st = t.stats;
-      const baseAng = Math.atan2(target.y - t.y, target.x - t.x);
-      const ang = baseAng + (angOffset || 0);
       const dmgMul = (buffs && buffs.dmgMul) || 1;
       let dmg = (st.dmg || 0) * dmgMul;
       // Precise Shot consumes one shot for x4 dmg
@@ -964,6 +1114,26 @@
       const isHoming = st.proj === 'homing';
       const isFrost = (st.proj === 'frost' || st.proj === 'frost-shatter');
       const isRail = st.proj === 'rail';
+
+      // Predict where the target will be when the projectile arrives.
+      // Homing self-corrects and rail is instant, so they aim at current pos.
+      // Other projectiles iteratively solve along the path for the actual
+      // intercept point (much more accurate than straight-line lead because
+      // enemies follow curves).
+      let aimX = target.x, aimY = target.y;
+      if (!isHoming && !isRail && typeof target.pathS === 'number') {
+        const vEff = (typeof target._vEff === 'number') ? target._vEff : (target.speed || 0);
+        let pathS = target.pathS;
+        for (let i = 0; i < 3; i++) {
+          const dist = Math.hypot(aimX - t.x, aimY - t.y);
+          const tof = dist / speed;
+          pathS = target.pathS + vEff * tof;
+          const fp = pointAt(pathS);
+          aimX = fp.x; aimY = fp.y;
+        }
+      }
+      const baseAng = Math.atan2(aimY - t.y, aimX - t.x);
+      const ang = baseAng + (angOffset || 0);
       // Sniper: instant rail; immediately resolve damage on target.
       if (isRail) {
         const realDmg = dmg * (st.antiArmorDmg && target.armored ? st.antiArmorDmg : 1);
@@ -1020,12 +1190,15 @@
       }
       p.life -= dt;
       if (p.life <= 0) { p.dead = true; return; }
-      // Mines: stationary, trigger when enemy enters
+      // Mines: stationary, trigger when enemy enters. Trigger check is a
+      // pure radius compare → squared distance. Splash falloff still uses
+      // the real distance (d2 below) because the damage curve needs it.
       if (p.isMine) {
         p.settle = Math.min(1, (p.settle || 0) + dt * 4);
         for (const e of this.enemies) {
-          const d = Math.hypot(e.x - p.x, e.y - p.y);
-          if (d < e.size * 0.4) {
+          const dx = e.x - p.x, dy = e.y - p.y;
+          const r = e.size * 0.4;
+          if (dx * dx + dy * dy < r * r) {
             // detonate
             for (const e2 of this.enemies) {
               const d2 = Math.hypot(e2.x - p.x, e2.y - p.y);
@@ -1042,14 +1215,16 @@
         }
         return;
       }
-      // Homing
+      // Homing — nearest-target acquisition. Comparing squared distances
+      // gives the same minimum, no sqrt needed.
       if (p.homing) {
         if (p.target && (p.target.dead || p.target.hp <= 0)) p.target = null;
         if (!p.target) {
-          let best = null, bd = 1e9;
+          let best = null, bd = 1e18;
           for (const e of this.enemies) {
-            const d = Math.hypot(e.x - p.x, e.y - p.y);
-            if (d < bd) { bd = d; best = e; }
+            const dx = e.x - p.x, dy = e.y - p.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bd) { bd = d2; best = e; }
           }
           p.target = best;
         }
@@ -1070,12 +1245,15 @@
       if (p.x < -20 || p.x > PLAY_W + 20 || p.y < -20 || p.y > H + 20) {
         p.dead = true; return;
       }
-      // Hit checks
+      // Hit checks. Pure radius compare → squared distance avoids the
+      // sqrt + function call on every (projectile, enemy) pair every
+      // frame. Identical results.
       for (const e of this.enemies) {
         if (p.hit.has(e)) continue;
         if (!O.EnemyMods.isVisibleTo(e, p.fromTower)) continue;
-        const d = Math.hypot(e.x - p.x, e.y - p.y);
-        if (d < e.size * 0.5) {
+        const dx = e.x - p.x, dy = e.y - p.y;
+        const r = e.size * 0.5;
+        if (dx * dx + dy * dy < r * r) {
           this._projHit(p, e);
           if (p.hit.size >= p.pierce) { p.dead = true; return; }
         }
@@ -1156,14 +1334,26 @@
           totalMul *= 1 + worldMul;
           // Insider Trading global window
           if (this.insiderTradingT > 0) totalMul *= 3;
-          const baseBounty = e.spec.bounty;
+          // Bounty: spec base × all aura/world/insider mults × freeplay
+          // bounty scale (so the player's economy keeps up with the
+          // hp-scaling treadmill, but slower).
+          const baseBounty = Math.max(1, Math.round(e.spec.bounty * (e._bountyScale || 1)));
           const bounty = Math.round(baseBounty * totalMul);
           this.cash += bounty;
+          if (this.stats) {
+            this.stats.kills++;
+            if (e.spec.boss) this.stats.bossKills++;
+            this.stats.cashEarned += bounty;
+          }
           if (bounty > baseBounty) this._cashFlash = 1.0;
           this.addScore(bounty * 5);
-          if (totalMul > 1) {
+          // Only show the bonus floater when the rounded delta is at least
+          // $1 — otherwise tiny multipliers on cheap enemies produce a
+          // misleading "+$0" pop.
+          const bonus = bounty - baseBounty;
+          if (bonus >= 1) {
             this.spawnFloater(e.x, e.y - e.size * 0.5,
-              '+$' + (bounty - baseBounty), '#ffd86b');
+              '+$' + bonus, '#ffd86b');
           }
           // Combo
           this._comboCount++;
@@ -1187,7 +1377,17 @@
           }
         }
       }
-      this.enemies = this.enemies.filter(e => !e.dead);
+      // In-place compact dead enemies (swap-and-pop). Identical observable
+      // behaviour to .filter(); just no per-frame array allocation.
+      {
+        const list = this.enemies;
+        let n = list.length;
+        for (let i = 0; i < n; ) {
+          if (list[i].dead) { list[i] = list[n - 1]; n--; }
+          else i++;
+        }
+        list.length = n;
+      }
     }
 
     // ---- Special ability hooks called by data/abilities.js ----
@@ -1403,6 +1603,44 @@
         ctx.textBaseline = 'bottom';
         ctx.fillText(t.text, PLAY_W / 2, cy + h / 2 - 8);
         ctx.restore();
+      }
+      // Camo intro tutorial banner — appears once when a camo enemy first
+      // shows up. Tells the player which towers can actually shoot them.
+      if (this.camoIntro) {
+        const t = this.camoIntro;
+        const fade = Math.min(1, t.t / 0.6);
+        const rise = Math.min(1, (8 - t.t) / 0.4);
+        ctx.save();
+        ctx.globalAlpha = fade;
+        const w = 480, h = 86;
+        const x = (PLAY_W - w) / 2;
+        const cy = 150 + (1 - rise) * -20;
+        ctx.fillStyle = 'rgba(8,12,28,0.94)';
+        ctx.fillRect(x, cy - h / 2, w, h);
+        ctx.strokeStyle = '#7ae0ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 0.5, cy - h / 2 + 0.5, w - 1, h - 1);
+        ctx.fillStyle = '#7ae0ff';
+        ctx.font = 'bold 12px ui-sans-serif, system-ui';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText('👁  CAMO ENEMIES INCOMING  👁', PLAY_W / 2, cy - h / 2 + 6);
+        ctx.fillStyle = '#e8ecf8';
+        ctx.font = '11px ui-sans-serif, system-ui';
+        ctx.fillText('Hidden enemies can only be hit by towers with camo detection.',
+                     PLAY_W / 2, cy - h / 2 + 26);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px ui-sans-serif, system-ui';
+        ctx.textBaseline = 'bottom';
+        const list = (t.towers && t.towers.length)
+          ? t.towers.join(' · ')
+          : '(none unlocked yet — clear more rounds!)';
+        ctx.fillText('Look for the 👁 badge:  ' + list, PLAY_W / 2, cy + h / 2 - 8);
+        ctx.restore();
+      }
+
+      // End-of-run modal — drawn last so it sits on top of everything.
+      if (this.endScreen && O.UI.EndScreen) {
+        O.UI.EndScreen.draw(ctx, this);
       }
     }
 

@@ -193,9 +193,21 @@
       ctx.fillStyle = COLORS.cash;
       ctx.textAlign = 'right';
       const shownRound = Math.max(1, game.round);
-      ctx.fillText(`${shownRound}/${game.maxRound}`, x + w - 4, top + 2);
+      // Freeplay: show "FP+N" instead of "round/max" so the player knows
+      // they're past the campaign and how deep they are.
+      if (game.mode === 'freeplay') {
+        ctx.fillText(`FP+${game.freeplayLevel | 0}`, x + w - 4, top + 2);
+      } else {
+        ctx.fillText(`${shownRound}/${game.maxRound}`, x + w - 4, top + 2);
+      }
+      // Act label (or freeplay banner once past campaign)
       const act = O.Rounds && O.Rounds.actFor(shownRound);
-      if (act) {
+      if (game.mode === 'freeplay') {
+        ctx.font = 'bold 10px ui-sans-serif, system-ui';
+        ctx.fillStyle = '#ff9055';
+        ctx.textAlign = 'left';
+        ctx.fillText('FREEPLAY · scaling', x + 4, top + 22);
+      } else if (act) {
         ctx.font = '10px ui-sans-serif, system-ui';
         ctx.fillStyle = act.color;
         ctx.textAlign = 'left';
@@ -267,16 +279,24 @@
       ctx.fillText('hotkeys 1-9, 0', xLeft + w - 4, yStart + 4);
 
       const cols = 2;
-      const gap = 4;
-      const tileW = (w - gap * (cols - 1)) / cols;
-      const tileH = 56;
-      const rowH = tileH + gap;
+      const gap = 3;
+      const totalRows = Math.ceil(keys.length / cols);
       const gridTop = yStart + 22;
       const gridBottom = this.h - 4;
       const visibleH = gridBottom - gridTop;
-      // Clamp scroll so we never scroll past the end of the grid
-      const totalRows = Math.ceil(keys.length / cols);
-      const totalH = totalRows * rowH;
+      // Adaptive tile height: shrink toward the floor (34) so the whole
+      // catalog fits without scrolling whenever possible. Cap at 56 so
+      // tiles don't get absurdly tall on very large screens.
+      const fitH = Math.floor((visibleH - gap * (totalRows - 1)) / totalRows);
+      const tileH = Math.max(34, Math.min(56, fitH));
+      const rowH = tileH + gap;
+      const totalH = totalRows * rowH - gap;
+      const overflows = totalH > visibleH;
+      // Reserve a thin scrollbar lane on the right ONLY when the catalog
+      // actually overflows, so non-scrolling layouts stay clean.
+      const lane = overflows ? 14 : 0;
+      const w2 = w - lane;
+      const tileW = (w2 - gap * (cols - 1)) / cols;
       const maxScroll = Math.max(0, totalH - visibleH);
       if (this.scroll > maxScroll) this.scroll = maxScroll;
       if (this.scroll < 0) this.scroll = 0;
@@ -284,7 +304,7 @@
       // Clip to grid region so partially-visible tiles look clean
       ctx.save();
       ctx.beginPath();
-      ctx.rect(xLeft, gridTop, w, visibleH);
+      ctx.rect(xLeft, gridTop, w2, visibleH);
       ctx.clip();
 
       for (let i = 0; i < keys.length; i++) {
@@ -301,16 +321,52 @@
       }
       ctx.restore();
 
-      // Tiny scroll indicator on the right edge if content overflows
-      if (totalH > visibleH) {
-        const trackY = gridTop;
-        const trackH = visibleH;
-        const thumbH = Math.max(20, trackH * (visibleH / totalH));
+      // Visible scrollbar with clickable up/down arrows + chunky thumb.
+      // Only drawn when the catalog actually overflows.
+      if (overflows) {
+        const sbX = xLeft + w - lane + 2;
+        const sbW = lane - 4;
+        const arrH = 12;
+        const trackY = gridTop + arrH + 2;
+        const trackH = visibleH - arrH * 2 - 4;
+        // Up arrow
+        const upR  = { x: sbX, y: gridTop, w: sbW, h: arrH };
+        const dnR  = { x: sbX, y: gridTop + visibleH - arrH, w: sbW, h: arrH };
+        const upHover = this.scroll > 0 && this._inRect(game._mx, game._my, upR);
+        const dnHover = this.scroll < maxScroll && this._inRect(game._mx, game._my, dnR);
+        const drawArrow = (rect, dir, active, hover) => {
+          ctx.fillStyle = hover ? COLORS.panelHi2 : (active ? '#1a2440' : '#0a0e1a');
+          ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+          ctx.strokeStyle = active ? COLORS.border : '#1a2440';
+          ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+          ctx.fillStyle = active ? COLORS.text : COLORS.locked;
+          ctx.beginPath();
+          const cxA = rect.x + rect.w / 2, cyA = rect.y + rect.h / 2;
+          if (dir === 'up') {
+            ctx.moveTo(cxA, cyA - 3);
+            ctx.lineTo(cxA + 4, cyA + 2);
+            ctx.lineTo(cxA - 4, cyA + 2);
+          } else {
+            ctx.moveTo(cxA, cyA + 3);
+            ctx.lineTo(cxA + 4, cyA - 2);
+            ctx.lineTo(cxA - 4, cyA - 2);
+          }
+          ctx.closePath();
+          ctx.fill();
+        };
+        drawArrow(upR, 'up',   this.scroll > 0,         upHover);
+        drawArrow(dnR, 'down', this.scroll < maxScroll, dnHover);
+        this.hits.push({ rect: upR, kind: 'scrollUp' });
+        this.hits.push({ rect: dnR, kind: 'scrollDown' });
+        // Thumb track
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(sbX, trackY, sbW, trackH);
+        const thumbH = Math.max(28, trackH * (visibleH / totalH));
         const thumbY = trackY + (trackH - thumbH) * (this.scroll / maxScroll);
-        ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        ctx.fillRect(xLeft + w - 2, trackY, 2, trackH);
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        ctx.fillRect(xLeft + w - 2, thumbY, 2, thumbH);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillRect(sbX, thumbY, sbW, thumbH);
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.strokeRect(sbX + 0.5, thumbY + 0.5, sbW - 1, thumbH - 1);
       }
     },
 
@@ -342,16 +398,24 @@
       ctx.fillRect(r.x, r.y, 3, r.h);
       ctx.globalAlpha = 1;
 
+      // Layout scales with tile height so 40px tiles still read cleanly.
+      const tall = r.h >= 50;
+      const iconSize = tall ? 30 : 22;
+      const nameFontPx = tall ? 11 : 10;
+      const costFontPx = tall ? 12 : 11;
+      const nameY = tall ? r.h - 16 : r.h - 13;
+      const costY = tall ? r.h - 3  : r.h - 2;
+
       // Sprite icon (top half, centered)
       const iconCX = r.x + r.w / 2;
-      const iconCY = r.y + 20;
+      const iconCY = r.y + (tall ? 18 : 14);
       ctx.save();
       if (!unlocked) ctx.globalAlpha = 0.35;
       if (Assets) {
-        Assets.draw(ctx, def.sprite, iconCX, iconCY, 32, 32, {
+        Assets.draw(ctx, def.sprite, iconCX, iconCY, iconSize, iconSize, {
           fallback: () => {
             ctx.fillStyle = def.color;
-            ctx.fillRect(iconCX - 14, iconCY - 14, 28, 28);
+            ctx.fillRect(iconCX - iconSize / 2, iconCY - iconSize / 2, iconSize, iconSize);
           }
         });
       }
@@ -363,21 +427,45 @@
       ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.fillText(hotkey === 10 ? '0' : String(hotkey), r.x + r.w - 4, r.y + 3);
 
+      // Camo-detection badge — top-left corner. Tells the player at a glance
+      // which towers can deal with hidden enemies.
+      if (O.Towers.hasCamoDetection && O.Towers.hasCamoDetection(key)) {
+        const ex = r.x + 4, ey = r.y + 4, ew = 11, eh = 7;
+        ctx.save();
+        if (!unlocked) ctx.globalAlpha = 0.5;
+        ctx.fillStyle = '#7ae0ff';
+        ctx.strokeStyle = '#0a0e18';
+        ctx.lineWidth = 0.8;
+        // Eye outline
+        ctx.beginPath();
+        ctx.moveTo(ex, ey + eh / 2);
+        ctx.quadraticCurveTo(ex + ew / 2, ey - eh / 2, ex + ew, ey + eh / 2);
+        ctx.quadraticCurveTo(ex + ew / 2, ey + eh * 1.2, ex, ey + eh / 2);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Pupil
+        ctx.fillStyle = '#0a0e18';
+        ctx.beginPath();
+        ctx.arc(ex + ew / 2, ey + eh / 2, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       // Name (bottom-center)
       ctx.fillStyle = unlocked ? (canAfford ? COLORS.text : COLORS.textDim) : COLORS.textDim;
-      ctx.font = 'bold 11px ui-sans-serif, system-ui';
+      ctx.font = 'bold ' + nameFontPx + 'px ui-sans-serif, system-ui';
       ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(def.short || def.name, r.x + r.w / 2, r.y + r.h - 16);
+      ctx.fillText(def.short || def.name, r.x + r.w / 2, r.y + nameY);
 
       // Cost or unlock requirement
       if (unlocked) {
         ctx.fillStyle = canAfford ? COLORS.cash : COLORS.life;
-        ctx.font = 'bold 12px ui-monospace, monospace';
-        ctx.fillText('$' + def.cost, r.x + r.w / 2, r.y + r.h - 3);
+        ctx.font = 'bold ' + costFontPx + 'px ui-monospace, monospace';
+        ctx.fillText('$' + def.cost, r.x + r.w / 2, r.y + costY);
       } else {
         ctx.fillStyle = COLORS.locked;
-        ctx.font = 'bold 11px ui-monospace, monospace';
-        ctx.fillText('R' + unlockR, r.x + r.w / 2, r.y + r.h - 3);
+        ctx.font = 'bold ' + (costFontPx - 1) + 'px ui-monospace, monospace';
+        ctx.fillText('R' + unlockR, r.x + r.w / 2, r.y + costY);
       }
 
       // Lock overlay
@@ -388,14 +476,17 @@
         // Padlock glyph
         ctx.strokeStyle = COLORS.locked;
         ctx.fillStyle = COLORS.locked;
-        ctx.lineWidth = 1.6;
+        ctx.lineWidth = tall ? 1.6 : 1.3;
         const lx = iconCX, ly = iconCY;
+        const lockR = tall ? 5 : 4;
+        const lockBodyW = tall ? 14 : 11;
+        const lockBodyH = tall ? 10 : 8;
         ctx.beginPath();
-        ctx.arc(lx, ly - 3, 5, Math.PI, 0, false);
+        ctx.arc(lx, ly - 3, lockR, Math.PI, 0, false);
         ctx.stroke();
-        ctx.fillRect(lx - 7, ly - 3, 14, 10);
+        ctx.fillRect(lx - lockBodyW / 2, ly - 3, lockBodyW, lockBodyH);
         ctx.fillStyle = '#08091a';
-        ctx.fillRect(lx - 0.8, ly + 1, 1.6, 4);
+        ctx.fillRect(lx - 0.8, ly + 1, 1.6, tall ? 4 : 3);
         ctx.restore();
       }
     },
@@ -660,14 +751,22 @@
         const unlocked = game.isTowerUnlocked
           ? game.isTowerUnlocked(h.key)
           : O.Towers.isUnlocked(h.key, Math.max(game.round || 0, game.bestRound || 0));
+        const camoCap = O.Towers.hasCamoDetection && O.Towers.hasCamoDetection(h.key);
+        // Compose description: base desc + (optional) "Reveals camo" line.
+        let desc = def.desc || '';
+        if (camoCap) {
+          const native = def.seesCamo;
+          desc += '  —  ' + (native ? '👁 Reveals CAMO natively.'
+                                    : '👁 Reveals CAMO via upgrade.');
+        }
         if (!unlocked) {
           const ur = O.Towers.unlockRound(h.key);
           this._tooltip(ctx, game._mx, game._my,
             '🔒 ' + def.name,
-            (def.desc || '') + '  —  Locked: clear round ' + ur + ' to unlock.',
+            desc + '  —  Locked: clear round ' + ur + ' to unlock.',
             'UNLOCKS R' + ur);
         } else {
-          this._tooltip(ctx, game._mx, game._my, def.name, def.desc || '', '$' + fmtCash(def.cost));
+          this._tooltip(ctx, game._mx, game._my, def.name, desc, '$' + fmtCash(def.cost));
         }
       } else if (h.kind === 'fireAbility') {
         const def = O.Abilities.get(h.abilityId);
@@ -676,8 +775,8 @@
     },
 
     _tooltip(ctx, mx, my, title, desc, footer) {
-      const W = 220;
-      const H = 86;
+      const W = 230;
+      const H = 104;
       let x = mx - W - 12;
       let y = my - H / 2;
       if (x < 4) x = 4;
@@ -762,6 +861,12 @@
           return true;
         case 'fireAbility':
           game.fireAbility(h.abilityId);
+          return true;
+        case 'scrollUp':
+          this.scroll = Math.max(0, this.scroll - 60);
+          return true;
+        case 'scrollDown':
+          this.scroll = this.scroll + 60;
           return true;
       }
       return mx >= this.x;

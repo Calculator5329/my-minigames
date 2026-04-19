@@ -75,7 +75,17 @@
   function buildGrid() {
     grid.innerHTML = '';
     cardCanvases.length = 0;
-    NDP.games.forEach(manifest => {
+    /* Sort by most-played (desc), ties broken by most-recently-played, then
+       by original registration order. Games never played sit at the bottom in
+       their registration order so the grid isn't reshuffled on first visit. */
+    const sorted = NDP.games.slice().sort((a, b) => {
+      const sa = Storage.getGameStats(a.id);
+      const sb = Storage.getGameStats(b.id);
+      if (sb.plays !== sa.plays) return (sb.plays | 0) - (sa.plays | 0);
+      if (sb.lastPlayed !== sa.lastPlayed) return (sb.lastPlayed | 0) - (sa.lastPlayed | 0);
+      return NDP.games.indexOf(a) - NDP.games.indexOf(b);
+    });
+    sorted.forEach(manifest => {
       const card = document.createElement('div');
       card.className = 'card';
       card.style.setProperty('--card-accent', manifest.theme?.accent || '#ffcc33');

@@ -166,7 +166,7 @@
           const cleared = bIdx - this.currentBiome;
           this.biomesClearedThisRun += cleared;
           // Mid-run progression: each new biome refills fuel, grants a shield,
-          // a permanent +6% thrust bonus, and a small Updraft popup.
+          // and a permanent +6% thrust bonus stacking through the run.
           for (let k = 0; k < cleared; k++) {
             this.fuel = this.fuelMax;
             this.shields++;
@@ -183,7 +183,8 @@
         this.flash(BIOMES[bIdx].topCol, 0.2);
       }
 
-      // Milestone tick: every 100m grants +1 Updraft and a tiny ping.
+      // Per-100m milestone — tiny ping for feedback. (Wallet income for
+      // altitude is tallied in coinsEarned at run end.)
       const meters = Math.floor(altitude / 10);
       const milestone = Math.floor(meters / 100);
       if (milestone > this.lastMilestone) {
@@ -606,6 +607,19 @@
       ctx.fillStyle = '#ffffffaa';
       ctx.fillText(BIOMES[bIdx].name, W - 20, 40);
 
+      if (this.banner) {
+        const a = Math.min(1, this.banner.t / 0.6);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(0, H * 0.32, W, 56);
+        ctx.fillStyle = this.banner.color || '#ffd86b';
+        ctx.font = 'bold 22px ui-monospace, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(this.banner.text, W / 2, H * 0.32 + 28);
+        ctx.restore();
+      }
+
       if (this.phase === 'victory') {
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         ctx.fillRect(0, 0, W, H);
@@ -695,9 +709,6 @@
       const altUpdrafts = Math.floor(altitude / 50);
       const biomeBonus = (this.biomesClearedThisRun | 0) * 8;
       const victory = this.victoryAchieved ? 30 : 0;
-      // bonusUpdrafts already accumulates milestone+biome popups awarded mid-run.
-      // Use altUpdrafts as the floor — it's the comprehensive base income — and
-      // add the biome/victory toppers once at end-of-run.
       return altUpdrafts + biomeBonus + victory;
     }
   }

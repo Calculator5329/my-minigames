@@ -14,6 +14,11 @@
   const NDP = window.NDP;
   const O = NDP.Orbital;
 
+  // Lives lost on leak (`dmg`) is roughly proportional to how hard the
+  // enemy is to kill. The scale is hand-tuned per tier rather than computed
+  // so swarms (tiny but plentiful) don't punish the player for one missed
+  // shot, while bigger enemies feel costly to let through. Reference:
+  // starting lives = 150.
   const TIERS = {
     swarmer: {
       hp: 6, speed: 92, size: 14, color: '#7aaaff',
@@ -26,31 +31,31 @@
     },
     drone: {
       hp: 30, speed: 86, size: 18, color: '#7aaaff',
-      sprite: 'orb_meteor_med', bounty: 8, dmg: 1
+      sprite: 'orb_meteor_med', bounty: 8, dmg: 2
     },
     bigast: {
       hp: 90, speed: 38, size: 32, color: '#a86a44',
-      sprite: 'orb_meteor_big', bounty: 22, dmg: 3,
+      sprite: 'orb_meteor_big', bounty: 22, dmg: 5,
       onDie: 'splitDrones2'
     },
     summoner: {
       hp: 140, speed: 42, size: 30, color: '#ff9055',
-      sprite: 'orb_enemy_summoner', bounty: 35, dmg: 2,
+      sprite: 'orb_enemy_summoner', bounty: 35, dmg: 6,
       summon: { type: 'swarmer', every: 1.8, count: 2 }
     },
     ufo: {
       hp: 320, speed: 48, size: 40, color: '#ff4fd8',
-      sprite: 'orb_elite', bounty: 95, dmg: 5,
+      sprite: 'orb_elite', bounty: 95, dmg: 12,
       stunResist: true
     },
     boss: {
       hp: 1800, speed: 38, size: 56, color: '#a070ff',
-      sprite: 'orb_boss', bounty: 600, dmg: 25,
+      sprite: 'orb_boss', bounty: 600, dmg: 35,
       boss: true, stunResist: true
     },
     titan: {
       hp: 9000, speed: 32, size: 78, color: '#ff5566',
-      sprite: 'orb_boss', bounty: 4000, dmg: 50,
+      sprite: 'orb_boss', bounty: 4000, dmg: 80,
       boss: true, stunResist: true,
       tint: '#ff5566',
       summon: { type: 'drone', every: 4, count: 2 }

@@ -89,6 +89,21 @@
         { label: 'Legend',          coinBonus: 0.40,distBonus: 0.18, cost: 5000 },
         { label: 'Vault-Chaser',    coinBonus: 0.60,distBonus: 0.30, cost: 12000 }
       ]
+    },
+    aero: {
+      name: 'Aerodynamics',
+      icon: 'aero',
+      desc: 'Frame trim — less drag, slightly more lift at high tiers.',
+      tiers: [
+        // dragMult and liftMult are read in _updateFlight and multiplied
+        // into the existing baseDrag / lift coefficients.
+        { label: 'Square Edges',   dragMult: 1.00, liftMult: 1.00 },
+        { label: 'Rounded Nose',   dragMult: 0.85, liftMult: 1.00, cost: 180 },
+        { label: 'Streamlined',    dragMult: 0.72, liftMult: 1.05, cost: 520 },
+        { label: 'Lift Vanes',     dragMult: 0.62, liftMult: 1.12, cost: 1500 },
+        { label: 'Nose Cone',      dragMult: 0.52, liftMult: 1.20, cost: 4000 },
+        { label: 'Wave Rider',     dragMult: 0.42, liftMult: 1.30, cost: 9500 }
+      ]
     }
   };
 
@@ -139,7 +154,9 @@
 
   // ------------- PICKUP / HAZARD POOL -------------
   // Spawn weight by altitude. The spawner picks weighted random each tick.
+  // Bands: 0=ground 1=low 2=mid-low 3=mid 4=upper 5=space 6=deep-space.
   LTH.SPAWNS = [
+    // ---- existing pickups ----
     { id: 'coin',     w: [8,10,9,6,4,3,2],  hazard: false, bandKey: 'all' },
     { id: 'coin_stack', w: [2,3,4,4,2,1,0], hazard: false, bandKey: 'all' },
     { id: 'fuel',     w: [0,2,3,4,3,2,1],   hazard: false, bandKey: 'all' },
@@ -148,23 +165,48 @@
     { id: 'cloud',    w: [2,4,3,1,0,0,0],   hazard: false, bandKey: 'low' },
     { id: 'trampoline',w:[1,1,0,0,0,0,0],   hazard: false, bandKey: 'ground' },
     { id: 'ring',     w: [0,2,3,3,2,2,1],   hazard: false, bandKey: 'all' },
-    // hazards — intentionally sparse so one hit hurts but doesn't chain-kill
+    // ---- NEW pickups (LTF-style) ----
+    // mega coin: rare, big payout — sprinkled across the whole climb
+    { id: 'mega_coin',  w: [0,1,1,1,1,2,2], hazard: false, bandKey: 'all' },
+    // shield bubble: most useful where hazards live — mid-to-space
+    { id: 'shield',     w: [0,0,1,1,1,1,1], hazard: false, bandKey: 'all' },
+    // magnet potion: nice in coin-dense bands
+    { id: 'magnet_potion', w: [0,1,1,1,1,1,0], hazard: false, bandKey: 'all' },
+    // boost can: nice anywhere fuel matters
+    { id: 'boost_can',  w: [0,1,1,1,1,1,1], hazard: false, bandKey: 'all' },
+    // slow time potion: helps thread the dense space band
+    { id: 'slow_time',  w: [0,0,0,1,1,1,1], hazard: false, bandKey: 'all' },
+
+    // ---- existing hazards ----
+    // intentionally sparse so one hit hurts but doesn't chain-kill
     { id: 'bird',     w: [1,2,1,0,0,0,0],   hazard: true,  bandKey: 'low' },
     { id: 'stormcloud',w:[0,1,1,0,0,0,0],   hazard: true,  bandKey: 'mid' },
     { id: 'ufo',      w: [0,0,0,1,1,2,1],   hazard: true,  bandKey: 'high' },
     { id: 'asteroid', w: [0,0,0,0,1,2,2],   hazard: true,  bandKey: 'space' },
-    { id: 'enemy',    w: [0,0,0,0,1,2,2],   hazard: true,  bandKey: 'space' }
+    { id: 'enemy',    w: [0,0,0,0,1,2,2],   hazard: true,  bandKey: 'space' },
+    // ---- NEW hazards ----
+    // lightning bolt: drops straight down at mid altitudes
+    { id: 'lightning',w: [0,1,1,1,0,0,0],   hazard: true,  bandKey: 'mid' },
+    // floating mine: drifts in upper atmosphere
+    { id: 'mine',     w: [0,0,1,1,1,0,0],   hazard: true,  bandKey: 'high' },
+    // comet: rare giant arc across the high sky
+    { id: 'comet',    w: [0,0,0,0,1,1,1],   hazard: true,  bandKey: 'space' }
   ];
 
   LTH.PICKUP_DEFS = {
-    coin:       { color: '#ffcc33', r: 9,  value: 1 },
-    coin_stack: { color: '#ffcc33', r: 16, value: 5 },
-    fuel:       { color: '#5fd4ff', r: 14 },
-    mult:       { color: '#ff7ad8', r: 14 },
-    balloon:    { color: '#ff6677', r: 22, boost: 360 },
-    cloud:      { color: '#fff', r: 40, drag: 0.005 },
-    trampoline: { color: '#ffcc33', r: 40, boost: 900 },
-    ring:       { color: '#ffdd77', r: 42, hole: 24 }
+    coin:          { color: '#ffcc33', r: 9,  value: 1 },
+    coin_stack:    { color: '#ffcc33', r: 16, value: 5 },
+    fuel:          { color: '#5fd4ff', r: 14 },
+    mult:          { color: '#ff7ad8', r: 14 },
+    balloon:       { color: '#ff6677', r: 22, boost: 360 },
+    cloud:         { color: '#fff',    r: 40, drag: 0.005 },
+    trampoline:    { color: '#ffcc33', r: 40, boost: 900 },
+    ring:          { color: '#ffdd77', r: 42, hole: 24 },
+    mega_coin:     { color: '#ffe680', r: 18, value: 25 },
+    shield:        { color: '#7ce0ff', r: 18 },
+    magnet_potion: { color: '#ff66cc', r: 16, magnet: 600, dur: 8 },
+    boost_can:     { color: '#ff8833', r: 16, fuel: 0.6, pulse: 0.5 },
+    slow_time:     { color: '#a6f', r: 16, slow: 0.5, dur: 4 }
   };
 
   LTH.HAZARD_DEFS = {
@@ -172,7 +214,10 @@
     stormcloud:{ color: '#333a',   r: 60, dmg: 6,  speedHit: 0.92, drag: 0.01, oneshot: true },
     ufo:       { color: '#99e',    r: 22, dmg: 14, speedHit: 0.85, chase: true },
     asteroid:  { color: '#8a6a4a', r: 28, dmg: 10, speedHit: 0.88 },
-    enemy:     { color: '#ff4455', r: 18, dmg: 10, speedHit: 0.9,  shoots: true }
+    enemy:     { color: '#ff4455', r: 18, dmg: 10, speedHit: 0.9,  shoots: true },
+    lightning: { color: '#ffff77', r: 16, dmg: 16, speedHit: 0.7,  drops: true },
+    mine:      { color: '#aa4422', r: 22, dmg: 18, speedHit: 0.55, knockback: 260 },
+    comet:     { color: '#ffaa55', r: 30, dmg: 15, speedHit: 0.6,  arcs: true, knockback: 180 }
   };
 
   // altitude band keys -> min/max altitude (for spawn biasing)
@@ -219,7 +264,22 @@
       bestCoins: 0,
       bossBeaten: false,
       totalCoinsEarned: 0,
-      stageIdx: 0
+      stageIdx: 0,
+
+      // ---- LTF-style depth pass (2026-04-19) ----
+      // Day-by-day campaign cursor; null campaign once dayIdx >= length.
+      dayIdx: 0,
+      // First time the player beats the vault, endless unlocks.
+      endlessUnlocked: false,
+      // 'campaign' | 'endless' — workshop toggle once endless is unlocked.
+      mode: 'campaign',
+      // Persistent medal progress; populated by LTH.defaultMedals if present.
+      medals: (typeof LTH.defaultMedals === 'function') ? LTH.defaultMedals() : {},
+      // Lifetime totals for the workshop STATS panel.
+      lifetime: {
+        distance: 0, altitude: 0, time: 0,
+        coins: 0, launches: 0, vaultPunches: 0
+      }
     };
   };
 
@@ -255,6 +315,20 @@
     Object.keys(def.tiers).forEach(k => {
       if (typeof merged.tiers[k] !== 'number') merged.tiers[k] = 0;
     });
+    // schema-grow safety for the LTF-style depth pass fields
+    if (typeof merged.dayIdx !== 'number') merged.dayIdx = 0;
+    if (typeof merged.endlessUnlocked !== 'boolean') merged.endlessUnlocked = false;
+    if (merged.mode !== 'campaign' && merged.mode !== 'endless') merged.mode = 'campaign';
+    if (!merged.medals || typeof merged.medals !== 'object') merged.medals = {};
+    if (typeof LTH.ensureMedalsSchema === 'function') LTH.ensureMedalsSchema(merged);
+    if (!merged.lifetime || typeof merged.lifetime !== 'object') {
+      merged.lifetime = { distance: 0, altitude: 0, time: 0, coins: 0, launches: 0, vaultPunches: 0 };
+    } else {
+      const lt = merged.lifetime;
+      ['distance','altitude','time','coins','launches','vaultPunches'].forEach(k => {
+        if (typeof lt[k] !== 'number') lt[k] = 0;
+      });
+    }
     // coins always read from the wallet of record
     try {
       const Storage = NDP.Engine && NDP.Engine.Storage;

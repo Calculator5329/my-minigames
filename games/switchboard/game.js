@@ -25,6 +25,17 @@
         halberd_calls_total: 0,
         final_self_call: null
       };
+      // Night 1 onboarding: a 4-step coach mark sequence that advances when
+      // the player does the thing it's prompting for. Once the player finishes
+      // their first successful route on Night 1 the tutorial dismisses for
+      // the rest of the run.
+      //   0 = waiting for first ringing call
+      //   1 = call is ringing, waiting for the player to click the lamp
+      //   2 = call answered, waiting for the player to hold L
+      //   3 = listening, waiting for a successful route
+      //   4 = done, never show again
+      this.tutorialStep = 0;
+      this.tutorialDoneOnce = false;
       this.loadNight(this.currentNight);
       this.ambient = makeAmbient();
       this._inputBound = false;
@@ -66,7 +77,8 @@
 
       if (this.phase === 'intro') {
         this.introT += dt;
-        const introDur = 3.2;
+        // Night 1 has the long onboarding intro; later nights are short.
+        const introDur = this.currentNight === 1 ? 9.0 : 3.2;
         if (this.introT >= introDur || Input.mouse.justPressed || Input.keys['Enter']) {
           this.phase = (this.currentNight === 5) ? 'walk' : 'board';
         }
@@ -104,7 +116,10 @@
     _tickBoard(dt) {
       const st = this.nightState;
       const hooks = {
-        ring: (c) => { SB.Voices.ring(); },
+        ring: (c) => {
+          SB.Voices.ring();
+          SB.Voices.prefetchTranscript(this._cid(c));
+        },
         missed: (c) => { this.flash('#d84a48', 0.15); },
         wrong: (c) => { this.flash('#d84a48', 0.25); this.shake(6, 0.2); SB.Voices.stop(this._cid(c)); },
         correct: (c) => { this.flash('#6cff9a', 0.1); SB.Voices.stop(this._cid(c)); },
@@ -131,6 +146,15 @@
       if (this.listening && st.focused) {
         SB.Nights.listenTick(st, st.focused, dt);
         if (st.focused.voice === 'halberd') this.flags.halberd_listened = true;
+      }
+
+      // Tutorial step machine — Night 1 only, and only until the first
+      // successful route is committed. Each transition is monotone, so we
+      // can't accidentally rewind if the player drops a call.
+      if (this.currentNight === 1 && !this.tutorialDoneOnce) {
+        if (this.tutorialStep === 0 && st.ringing.size > 0) this.tutorialStep = 1;
+        if (this.tutorialStep === 1 && st.focused) this.tutorialStep = 2;
+        if (this.tutorialStep === 2 && this.listening && st.focused) this.tutorialStep = 3;
       }
 
       // Score = composure + listen bonus, per night
@@ -233,7 +257,13 @@
           const outSock = ea.side === 'out' ? ea : eb;
           const res = SB.Nights.commitRoute(this.nightState, inSock.line, outSock.line, {
             wrong: () => { this.flash('#d84a48', 0.2); this.shake(6, 0.2); },
-            correct: () => { this.flash('#6cff9a', 0.1); },
+            correct: () => {
+              this.flash('#6cff9a', 0.1);
+              if (this.currentNight === 1 && this.tutorialStep === 3) {
+                this.tutorialStep = 4;
+                this.tutorialDoneOnce = true;
+              }
+            },
             denied: () => {}
           });
           // After a route is committed, pop the jacks back to parked so
@@ -257,14 +287,20 @@
     }
 
     _keyDown(e) {
-      if (e.key === 'l' || e.key === 'L') this.listening = true;
+      if (e.key === 'l' || e.key === 'L') {
+        this.listening = true;
+        SB.Voices.setListening(true);
+      }
       if ((e.key === 'd' || e.key === 'D') && this.nightState && this.nightState.focused) {
         const line = this.nightState.focused.line;
         SB.Nights.denyCall(this.nightState, line, { denied: (c) => { SB.Voices.stop(this._cid(c)); } });
       }
     }
     _keyUp(e) {
-      if (e.key === 'l' || e.key === 'L') this.listening = false;
+      if (e.key === 'l' || e.key === 'L') {
+        this.listening = false;
+        SB.Voices.setListening(false);
+      }
     }
 
     render(ctx) {
@@ -303,6 +339,9 @@
         directory: st.directory,
         composure: st.composure,
         composureMax: st.composureMax,
+        listening: this.listening,
+        escalation: Math.min(1, (this.currentNight - 1) / 4),
+        currentNight: this.currentNight,
         hudRight: `NIGHT ${this.currentNight} — ${Math.max(0, (st.night.durationSec - st.t) | 0)}s`
       });
 
@@ -331,6 +370,103 @@
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('"' + this.focusHint + '"', W / 2, 60);
       }
+
+      // Night-1 coach marks
+      if (this.currentNight === 1 && this.tutorialStep > 0 && this.tutorialStep < 4) {
+        this._drawTutorial(ctx);
+      }
+    }
+
+    /* Step-by-step coach marks for Night 1. Each step paints a banner under
+       the header explaining the next action and (when meaningful) draws a
+       pulsing arrow toward the relevant element on the board. */
+    _drawTutorial(ctx) {
+      const st = this.nightState;
+      let title = '', sub = '', arrow = null;
+
+      if (this.tutorialStep === 1) {
+        title = 'STEP 1 — ANSWER THE CALL';
+        sub = 'Click the glowing lamp on the INCOMING row.';
+        // Arrow at the first ringing socket
+        const first = st.ringing.values().next().value;
+        if (first) {
+          const sock = this.board.sockets.find(s => s.side === 'in' && s.line === first.line);
+          if (sock) arrow = { x: sock.x, y: sock.y - 26, dir: 'down' };
+        }
+      } else if (this.tutorialStep === 2) {
+        title = 'STEP 2 — LEAN IN';
+        sub = 'Press and HOLD the [L] key to hear what the caller wants.';
+        // Arrow at the caller card
+        arrow = { x: 240, y: 360, dir: 'down' };
+      } else if (this.tutorialStep === 3) {
+        const want = st.focused && st.focused.request;
+        const wantLine = want && st.directory ? st.directory[want] : null;
+        const inLine = st.focused && st.focused.line;
+        title = 'STEP 3 — CONNECT THE LINE';
+        if (want && wantLine && inLine) {
+          sub = `They want "${want}" — that\'s outgoing line ${wantLine}.\nDrag a cable from incoming ${inLine} (top) to outgoing ${wantLine} (bottom).`;
+          // Arrow at the destination outgoing socket
+          const out = this.board.sockets.find(s => s.side === 'out' && s.line === wantLine);
+          if (out) arrow = { x: out.x, y: out.y + 26, dir: 'up' };
+        } else {
+          sub = 'Find their request in the DIRECTORY (right) and drag a cable from their incoming socket to that outgoing socket.';
+        }
+      }
+
+      if (!title) return;
+      // Pulsing banner just under the brass header
+      const pulse = 0.85 + 0.15 * Math.sin(this.time * 4);
+      const lines = sub.split('\n');
+      const w = 720;
+      const h = 30 + lines.length * 18 + 12;
+      const x = (W - w) / 2, y = 36;
+      ctx.fillStyle = `rgba(20,12,6,${(0.92 * pulse).toFixed(3)})`;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = '#ffec7a'; ctx.lineWidth = 2;
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      ctx.fillStyle = '#ffec7a';
+      ctx.font = 'bold 13px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(title, x + w / 2, y + 8);
+      ctx.fillStyle = '#f4e6c4';
+      ctx.font = '12px ui-monospace, monospace';
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], x + w / 2, y + 28 + i * 18);
+      }
+
+      if (arrow) this._drawCoachArrow(ctx, arrow.x, arrow.y, arrow.dir);
+    }
+
+    _drawCoachArrow(ctx, x, y, dir) {
+      const t = this.time * 4;
+      const bob = Math.sin(t) * 4;
+      ctx.save();
+      ctx.fillStyle = '#ffec7a';
+      ctx.strokeStyle = '#3a2a18'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (dir === 'down') {
+        const cy = y - 12 - bob;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 9, cy);
+        ctx.lineTo(x - 4, cy);
+        ctx.lineTo(x - 4, cy - 18);
+        ctx.lineTo(x + 4, cy - 18);
+        ctx.lineTo(x + 4, cy);
+        ctx.lineTo(x + 9, cy);
+        ctx.closePath();
+      } else { // 'up'
+        const cy = y + 12 + bob;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 9, cy);
+        ctx.lineTo(x - 4, cy);
+        ctx.lineTo(x - 4, cy + 18);
+        ctx.lineTo(x + 4, cy + 18);
+        ctx.lineTo(x + 4, cy);
+        ctx.lineTo(x + 9, cy);
+        ctx.closePath();
+      }
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
 
     _scoreFor(endingKey) {

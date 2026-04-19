@@ -1613,15 +1613,29 @@
 
     _drawThrottle(ctx) {
       const r = this.throttleRect;
-      ctx.fillStyle = '#0a1020';
-      ctx.fillRect(r.x - 8, r.y - 30, r.w + 16, r.h + 60);
+      /* Outer chrome bezel — gives the panel a tactile, instrument feel. */
+      const bezelX = r.x - 12, bezelY = r.y - 32, bezelW = r.w + 24, bezelH = r.h + 64;
+      const bezel = ctx.createLinearGradient(bezelX, bezelY, bezelX, bezelY + bezelH);
+      bezel.addColorStop(0, '#0e1424');
+      bezel.addColorStop(1, '#070b18');
+      ctx.fillStyle = bezel;
+      ctx.fillRect(bezelX, bezelY, bezelW, bezelH);
       ctx.strokeStyle = '#3a4660'; ctx.lineWidth = 2;
-      ctx.strokeRect(r.x - 8, r.y - 30, r.w + 16, r.h + 60);
+      ctx.strokeRect(bezelX + 0.5, bezelY + 0.5, bezelW - 1, bezelH - 1);
+      /* Top-edge highlight strip */
+      ctx.fillStyle = 'rgba(124,217,255,0.15)';
+      ctx.fillRect(bezelX + 2, bezelY + 2, bezelW - 4, 1);
+
       ctx.fillStyle = '#cfe9ff';
       ctx.font = 'bold 12px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillText('THROTTLE', r.x + r.w/2, r.y - 24);
 
+      /* Recessed channel for the slider — drop-shadow inset */
+      ctx.fillStyle = '#050810';
+      ctx.fillRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+
+      /* Colour gradient. */
       const grad = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
       grad.addColorStop(0, '#ff3a3a');
       grad.addColorStop(0.3, '#ffae44');
@@ -1629,6 +1643,14 @@
       grad.addColorStop(1, '#7cd9ff');
       ctx.fillStyle = grad;
       ctx.fillRect(r.x, r.y, r.w, r.h);
+      /* Glassy vertical highlight on the slider's left edge. */
+      const gl = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+      gl.addColorStop(0, 'rgba(255,255,255,0.20)');
+      gl.addColorStop(0.4, 'rgba(255,255,255,0.0)');
+      gl.addColorStop(1, 'rgba(0,0,0,0.25)');
+      ctx.fillStyle = gl;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+
       ctx.strokeStyle = '#3a4660'; ctx.lineWidth = 1;
       ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
 
@@ -1636,26 +1658,51 @@
       if ((this.modules.pump || 0) > 0) {
         const yTop = r.y + (1 - 0.60) * r.h;
         const yBot = r.y + (1 - 0.20) * r.h;
+        ctx.fillStyle = 'rgba(183,148,246,0.10)';
+        ctx.fillRect(r.x, yTop, r.w, yBot - yTop);
         ctx.strokeStyle = 'rgba(183,148,246,0.7)';
         ctx.lineWidth = 1;
         ctx.strokeRect(r.x - 1, yTop, r.w + 2, yBot - yTop);
+        /* Tiny He³ label on the band. */
+        ctx.fillStyle = 'rgba(183,148,246,0.85)';
+        ctx.font = 'bold 8px ui-monospace, monospace';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText('He³', r.x - 11, (yTop + yBot) / 2);
       }
 
-      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+      /* Tick ridges on both sides for that mechanical-slider look. */
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       for (let i = 1; i < 10; i++) {
         const y = r.y + (r.h * i / 10);
-        ctx.beginPath(); ctx.moveTo(r.x, y); ctx.lineTo(r.x + r.w * 0.25, y); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(r.x + r.w * 0.75, y); ctx.lineTo(r.x + r.w, y); ctx.stroke();
+        const long = i % 5 === 0;
+        const len = long ? 0.35 : 0.22;
+        ctx.beginPath(); ctx.moveTo(r.x, y); ctx.lineTo(r.x + r.w * len, y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(r.x + r.w * (1 - len), y); ctx.lineTo(r.x + r.w, y); ctx.stroke();
       }
 
+      /* Knob — drop shadow underneath, then bevelled chassis, then a yellow
+         indicator stripe across the centre. */
       const ky = r.y + (1 - this.throttle) * r.h;
-      ctx.fillStyle = '#101828';
-      ctx.fillRect(r.x - 6, ky - 8, r.w + 12, 16);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(r.x - 8, ky - 7, r.w + 16, 18);
+      const kg = ctx.createLinearGradient(0, ky - 8, 0, ky + 8);
+      kg.addColorStop(0, '#2a3552');
+      kg.addColorStop(0.5, '#1a2238');
+      kg.addColorStop(1, '#0a1020');
+      ctx.fillStyle = kg;
+      ctx.fillRect(r.x - 8, ky - 8, r.w + 16, 16);
       ctx.strokeStyle = '#ffd86b'; ctx.lineWidth = 2;
-      ctx.strokeRect(r.x - 6, ky - 8, r.w + 12, 16);
+      ctx.strokeRect(r.x - 8, ky - 8, r.w + 16, 16);
+      /* Notch grips on the knob */
+      ctx.fillStyle = 'rgba(255,216,107,0.55)';
+      for (let g = -2; g <= 2; g++) {
+        ctx.fillRect(r.x + 4 + (g + 2) * 7, ky - 5, 1, 10);
+      }
+      /* Centre indicator stripe */
       ctx.fillStyle = '#ffd86b';
-      ctx.fillRect(r.x - 2, ky - 1, r.w + 4, 2);
+      ctx.fillRect(r.x - 4, ky - 1, r.w + 8, 2);
 
+      /* Readout */
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 14px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1667,22 +1714,78 @@
       const ready = this.ventCooldown <= 0;
       const cost = Math.max(50, Math.floor(this.cash * 0.25));
       const canAfford = this.cash >= cost;
-      ctx.fillStyle = ready && canAfford ? '#1c2a40' : '#0e1420';
+      const live = ready && canAfford;
+      /* Pulse only when the player should actually press the button —
+         critical heat AND the button is ready. Drives attention without
+         creating an annoying constant strobe. */
+      const urgent = live && this.heat > this.maxHeat;
+      const pulse = urgent ? 0.6 + 0.4 * Math.abs(Math.sin(this.time * 6)) : 1;
+
+      /* Drop shadow / depth */
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(r.x + 2, r.y + 4, r.w, r.h);
+
+      /* Body — gradient tinted by state. */
+      const bg = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
+      if (live) {
+        bg.addColorStop(0, '#1c2a40');
+        bg.addColorStop(1, '#0a1530');
+      } else {
+        bg.addColorStop(0, '#10141f');
+        bg.addColorStop(1, '#080b14');
+      }
+      ctx.fillStyle = bg;
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = ready && canAfford ? '#7cd9ff' : '#3a4660';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+
+      /* Glow when urgent */
+      if (urgent) {
+        ctx.save();
+        ctx.shadowColor = '#ff5e7e';
+        ctx.shadowBlur = 18 * pulse;
+        ctx.strokeStyle = `rgba(255,94,126,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+        ctx.restore();
+      } else {
+        ctx.strokeStyle = live ? '#7cd9ff' : '#3a4660';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+      }
+
+      /* Hazard chevron strip across the top */
+      ctx.fillStyle = live ? 'rgba(124,217,255,0.18)' : 'rgba(58,70,96,0.18)';
+      ctx.fillRect(r.x + 2, r.y + 2, r.w - 4, 6);
+      ctx.fillStyle = live ? 'rgba(124,217,255,0.6)' : 'rgba(80,90,110,0.5)';
+      for (let i = 0; i < 7; i++) {
+        const x = r.x + 4 + i * 12;
+        ctx.beginPath();
+        ctx.moveTo(x, r.y + 8);
+        ctx.lineTo(x + 5, r.y + 4);
+        ctx.lineTo(x + 8, r.y + 4);
+        ctx.lineTo(x + 3, r.y + 8);
+        ctx.closePath(); ctx.fill();
+      }
+
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = 'bold 13px ui-monospace, monospace';
-      ctx.fillText('EMERGENCY', r.x + r.w/2, r.y + 18);
-      ctx.fillText('VENT', r.x + r.w/2, r.y + 34);
+      ctx.fillText('EMERGENCY', r.x + r.w/2, r.y + 24);
+      ctx.fillText('VENT', r.x + r.w/2, r.y + 40);
       ctx.font = '10px ui-monospace, monospace';
-      ctx.fillStyle = ready && canAfford ? '#ffd86b' : '#667';
+      ctx.fillStyle = live ? '#ffd86b' : '#667';
       if (ready) {
-        ctx.fillText('Cost $' + fmt(cost), r.x + r.w/2, r.y + 54);
+        ctx.fillText('Cost $' + fmt(cost), r.x + r.w/2, r.y + 58);
       } else {
-        ctx.fillText('Cooldown ' + this.ventCooldown.toFixed(1) + 's', r.x + r.w/2, r.y + 54);
+        /* Cooldown progress bar replaces text label. */
+        const f = clamp(1 - this.ventCooldown / 6, 0, 1);
+        const barW = r.w - 16;
+        ctx.fillStyle = '#0a1020';
+        ctx.fillRect(r.x + 8, r.y + 56, barW, 4);
+        ctx.fillStyle = '#7cd9ff';
+        ctx.fillRect(r.x + 8, r.y + 56, barW * f, 4);
+        ctx.fillStyle = '#8892a6';
+        ctx.font = '9px ui-monospace, monospace';
+        ctx.fillText(this.ventCooldown.toFixed(1) + 's', r.x + r.w/2, r.y + 64);
       }
     }
 
@@ -1690,16 +1793,62 @@
       const cx = this.heatGaugeC.x, cy = this.heatGaugeC.y, r = this.heatGaugeC.r;
       const startA = Math.PI * 0.85, endA = Math.PI * 0.15;
       const total = (Math.PI * 2) - (startA - endA);
-      ctx.strokeStyle = '#1a2230'; ctx.lineWidth = 14;
-      ctx.beginPath(); ctx.arc(cx, cy, r, startA, startA + total, false); ctx.stroke();
       const SCALE_MAX = 1.2;
       const heatPct = this.heat / this.maxHeat;
       const visPct = clamp(heatPct, 0, SCALE_MAX) / SCALE_MAX;
-      ctx.strokeStyle = this._heatColor(clamp(heatPct, 0, 1.3)).css;
+      const heatCol = this._heatColor(clamp(heatPct, 0, 1.3));
+
+      /* Behind-arc dial — draw colored zones (cool→warm→hot→meltdown) at low
+         alpha so the player can read the gauge at a glance. */
+      const segments = [
+        { from: 0.00, to: 0.50, c: 'rgba(74,222,128,0.18)' },
+        { from: 0.50, to: 0.78, c: 'rgba(255,174,68,0.18)' },
+        { from: 0.78, to: 1.00 / SCALE_MAX, c: 'rgba(255,94,126,0.20)' },
+        { from: 1.00 / SCALE_MAX, to: 1, c: 'rgba(255,58,58,0.25)' }
+      ];
+      ctx.lineWidth = 14;
+      for (const s of segments) {
+        ctx.strokeStyle = s.c;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, startA + total * s.from, startA + total * s.to, false);
+        ctx.stroke();
+      }
+
+      /* Empty dial track on top of zones */
+      ctx.strokeStyle = '#1a2230'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 8, startA, startA + total, false); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, r - 8, startA, startA + total, false); ctx.stroke();
+
+      /* Pulsing critical halo when over max heat. */
+      if (heatPct > 1) {
+        const pulse = 0.5 + 0.5 * Math.abs(Math.sin(this.time * 8));
+        ctx.save();
+        ctx.shadowColor = '#ff3a3a'; ctx.shadowBlur = 30 * pulse;
+        ctx.strokeStyle = `rgba(255,58,58,${0.35 * pulse})`;
+        ctx.lineWidth = 14;
+        ctx.beginPath(); ctx.arc(cx, cy, r, startA, startA + total * visPct, false); ctx.stroke();
+        ctx.restore();
+      }
+
+      /* Active heat arc with a soft inner glow */
+      ctx.save();
+      ctx.shadowColor = heatCol.css;
+      ctx.shadowBlur = 8 + heatPct * 18;
+      ctx.strokeStyle = heatCol.css;
       ctx.lineWidth = 12;
       ctx.beginPath();
       ctx.arc(cx, cy, r, startA, startA + total * visPct, false);
       ctx.stroke();
+      ctx.restore();
+
+      /* Bright pip at the leading edge of the arc — looks like a needle tip. */
+      const tipA = startA + total * visPct;
+      const tipX = cx + Math.cos(tipA) * r;
+      const tipY = cy + Math.sin(tipA) * r;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(tipX, tipY, 3.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = heatCol.rgba(0.85);
+      ctx.beginPath(); ctx.arc(tipX, tipY, 5.5, 0, Math.PI * 2); ctx.fill();
       /* Tick at 100% (max heat — alarm zone begins). */
       const hot = this._heatColor(1);
       ctx.strokeStyle = hot.css; ctx.lineWidth = 3;

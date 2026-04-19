@@ -7,14 +7,17 @@
 
   function roundBonusBreakdown(state) {
     // state: { round, leakedThisRound: bool, noLeakStreak, longestCombo }
-    const base = 60 + state.round * 4;
+    // Base scales linearly with round so late-game upgrade purchases (often
+    // $3-6k each) stay affordable without farming. R1 = $86, R10 = $140,
+    // R30 = $260, R50 = $380. ~50% bigger than the previous curve.
+    const base = 80 + state.round * 6;
     // Streak: ×1.0 at streak 0, +0.1 per streak, cap ×2.0 at streak 10.
     const streakMul = state.leakedThisRound
       ? 1.0
       : Math.min(2.0, 1.0 + 0.1 * (state.noLeakStreak + 1));
     const streakBonus = Math.round(base * (streakMul - 1));
-    // Combo: extra cash for sustained pop windows. 1$ per combo length above 5.
-    const comboBonus = Math.max(0, (state.longestCombo || 0) - 5) * 2;
+    // Combo: extra cash for sustained pop windows. $3 per combo length above 5.
+    const comboBonus = Math.max(0, (state.longestCombo || 0) - 5) * 3;
     const total = base + streakBonus + comboBonus;
     return { base, streakMul, streakBonus, comboBonus, total };
   }

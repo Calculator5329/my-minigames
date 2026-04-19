@@ -81,18 +81,26 @@
 
   /* Render the board. `state` carries ringing/active flags + directory. */
   function render(ctx, board, state) {
-    // Wooden panel background
+    const escal = state.escalation || 0;
+
+    // Wooden panel background — slight color drift toward sickly green-grey
+    // as escalation climbs.
     const grd = ctx.createLinearGradient(0, 0, 0, H);
-    grd.addColorStop(0, '#2a1a0e'); grd.addColorStop(1, '#17100a');
+    const top = lerpColor('#2a1a0e', '#1a1c12', escal);
+    const bot = lerpColor('#17100a', '#0a0c0a', escal);
+    grd.addColorStop(0, top); grd.addColorStop(1, bot);
     ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
 
-    // Brass header / frame
+    // Brass header / frame — letters flicker more on later nights
     ctx.fillStyle = '#3a2a18'; ctx.fillRect(0, 0, W, 28);
+    const headerFlicker = (Math.random() < 0.005 + escal * 0.05) ? 0.35 : 1;
+    ctx.globalAlpha = headerFlicker;
     ctx.fillStyle = '#c7a35a'; ctx.font = 'bold 14px ui-monospace, monospace';
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText('OPERATOR — 418 LINDEN EXCHANGE', 16, 14);
     ctx.textAlign = 'right';
     ctx.fillText(state.hudRight || '', W - 16, 14);
+    ctx.globalAlpha = 1;
 
     // Socket panel inset
     ctx.fillStyle = '#1f140a';
@@ -128,6 +136,16 @@
         ctx.fillStyle = '#6cf';
         ctx.beginPath(); ctx.arc(s.x, s.y - 26, 4, 0, Math.PI * 2); ctx.fill();
       }
+      // Ghost lamp — every so often, a non-ringing socket on later nights
+      // briefly lights and goes dark again. Purely cosmetic dread.
+      if (!ringing && !answered && s.side === 'in' && escal > 0.25) {
+        const seed = (s.line * 911 + Math.floor(state.time * 0.7)) % 997;
+        if (seed < Math.floor(escal * 6)) {
+          const ghost = 0.25 + 0.5 * Math.abs(Math.sin(state.time * 13 + s.line));
+          ctx.fillStyle = `rgba(216,74,72,${ghost.toFixed(2)})`;
+          ctx.beginPath(); ctx.arc(s.x, s.y - 26, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
       // Number label
       ctx.fillStyle = '#8a6a3a';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -135,20 +153,23 @@
       ctx.fillText(String(s.line), s.x, s.y + (s.side === 'in' ? -40 : 42));
     }
 
-    // Cables — bezier curves for each plugged pair, straight when parked
+    // Cables — bezier curves for each plugged pair, straight when parked.
+    // On later nights a faint sway gets added so the cables look alive.
     for (const c of board.cables) {
-      const color = c.color || '#d84a48';
+      const baseColor = c.color || '#d84a48';
+      const color = lerpColor(baseColor, '#5a1010', escal * 0.7);
       ctx.strokeStyle = color;
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(c.a.x, c.a.y);
-      // Mid control point droops
       const midX = (c.a.x + c.b.x) / 2;
-      const midY = Math.max(c.a.y, c.b.y) + 80;
+      let midY = Math.max(c.a.y, c.b.y) + 80;
+      if (escal > 0) {
+        midY += Math.sin(state.time * 1.4 + c.id) * 5 * escal;
+      }
       ctx.quadraticCurveTo(midX, midY, c.b.x, c.b.y);
       ctx.stroke();
-      // Jacks
       for (const end of ['a', 'b']) {
         const j = c[end];
         ctx.fillStyle = '#e2ca7a';
@@ -166,6 +187,36 @@
 
     // Failure meter (composure)
     drawComposure(ctx, state);
+
+    // Faint scanlines + vignette intensify with escalation. The scanlines
+    // turn the board into a stuttering CRT image as the nights progress.
+    if (escal > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.08 + escal * 0.10;
+      ctx.fillStyle = '#000';
+      for (let y = 0; y < H; y += 3) {
+        ctx.fillRect(0, y, W, 1);
+      }
+      ctx.restore();
+    }
+    // Periodic full-board static flash on later nights
+    if (escal > 0.5 && Math.random() < 0.005 * escal) {
+      ctx.fillStyle = `rgba(216,74,72,${(0.05 + escal * 0.10).toFixed(2)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  /* tiny helper: lerp two #rrggbb colors */
+  function lerpColor(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    const pa = hex(a), pb = hex(b);
+    const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
+    const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
+    const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
+    return '#' + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+  }
+  function hex(s) {
+    return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
   }
 
   function drawDirectory(ctx, state) {
@@ -213,14 +264,35 @@
     ctx.fillStyle = '#a58a5a';
     ctx.font = '12px ui-monospace, monospace';
     ctx.fillText('on line ' + call.line + (call.request ? ' → wants: ' + call.request : ''), x + 10, y + 56);
-    ctx.fillStyle = '#f4e6c4';
-    ctx.font = '12px ui-monospace, monospace';
-    wrapText(ctx, '"' + call.text + '"', x + 10, y + 84, w - 20, 16);
 
-    // Listen hint
-    ctx.fillStyle = '#c7a35a';
-    ctx.font = '11px ui-monospace, monospace';
-    ctx.fillText('[L]  hold to listen', x + 10, y + h - 22);
+    /* Spoken text — full-bright when leaning in, dim + scrambled-looking
+       when not, to mirror what your ear is doing through the wire. We
+       prefer the baked transcript (what was actually spoken in the wav)
+       over the original script so the caption never drifts from the audio. */
+    const lean = !!state.listening;
+    const callId = call.idx != null && state.currentNight
+      ? `n${state.currentNight}_c${call.idx}`
+      : null;
+    const transcript = (callId && SB.Voices && SB.Voices.getTranscript)
+      ? SB.Voices.getTranscript(callId)
+      : null;
+    const spoken = transcript || call.text;
+    if (lean) {
+      ctx.fillStyle = '#f4e6c4';
+      ctx.font = '12px ui-monospace, monospace';
+      wrapText(ctx, '"' + spoken + '"', x + 10, y + 84, w - 20, 16);
+    } else {
+      ctx.fillStyle = '#5a4830';
+      ctx.font = '12px ui-monospace, monospace';
+      const scrambled = '"' + spoken.replace(/[A-Za-z0-9]/g, '·') + '"';
+      wrapText(ctx, scrambled, x + 10, y + 84, w - 20, 16);
+    }
+
+    // Listen hint — pulses gently while a call is unanswered-listening
+    const pulse = lean ? 1.0 : (0.55 + 0.45 * Math.sin(state.time * 6));
+    ctx.fillStyle = lean ? '#ffec7a' : `rgba(199,163,90,${pulse.toFixed(3)})`;
+    ctx.font = 'bold 11px ui-monospace, monospace';
+    ctx.fillText(lean ? '[L]  LISTENING' : '[L]  hold to lean in', x + 10, y + h - 22);
 
     // Time remaining bar
     if (call.ttl != null) {

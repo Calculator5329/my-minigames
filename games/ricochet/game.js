@@ -67,20 +67,26 @@
       this.player = { x: W / 2, y: H - 60 };
       this.enemies = [];
       this.obstacles = [];
+      this.portals = [];
+      this.popups = [];     // floating texts: combos, hits
       this.bullet = null;
       this.fired = false;
       this.levelResult = null;
       this.levelPause = 0;
       this.pierceLeft = this.save.upgrades.pierce;
+      // Per-shot stats for the post-shot summary card.
+      this.shotStats = { kills: 0, bounces: 0, bestCombo: 0, bonus: 0 };
 
       const isBoss = L % 5 === 0;
       if (isBoss) {
         // Single tanky enemy center-ish, with orbital obstacles
+        const bossHp = 3 + Math.floor(L / 5);
         this.enemies.push({
           x: W / 2, y: H * 0.4, r: 34,
-          hp: 3 + Math.floor(L / 5), maxHp: 3 + Math.floor(L / 5),
+          hp: bossHp, maxHp: bossHp,
           vx: 40, vy: 20,
-          alive: true, kind: 'boss', color: '#ff7744'
+          alive: true, kind: 'boss', color: '#ff7744',
+          phase2: false
         });
         this.sfx.play('boss');
         // orbital obstacles
@@ -124,6 +130,17 @@
           const ry = 80 + Math.random() * (H - 280 - h);
           this.obstacles.push({ x: rx, y: ry, w, h });
         }
+        // Portal pairs — appear from level 4 onward, second pair from level 8.
+        // Bullet entering one portal exits the other along its current heading.
+        const portalPairs = L >= 8 ? 2 : (L >= 4 ? 1 : 0);
+        for (let i = 0; i < portalPairs; i++) {
+          const a = this._placePortal();
+          const b = this._placePortal();
+          if (a && b) {
+            a.pair = b; b.pair = a;
+            this.portals.push(a, b);
+          }
+        }
       }
 
       this.bulletEnergy = 1.0;
@@ -131,9 +148,98 @@
       this.maxBounces = 14 + L + this.save.upgrades.bounce * 4;
     }
 
+    // ---------- Helpers ----------
+
+    _placePortal() {
+      // Find a free spot not overlapping obstacles or the player.
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const x = 90 + Math.random() * (W - 180);
+        const y = 90 + Math.random() * (H - 240);
+        let ok = true;
+        for (const o of this.obstacles) {
+          if (x + 24 > o.x && x - 24 < o.x + o.w && y + 24 > o.y && y - 24 < o.y + o.h) { ok = false; break; }
+        }
+        if (Math.hypot(x - this.player.x, y - this.player.y) < 80) ok = false;
+        if (ok) return { kind: 'portal', x, y, r: 18, t: Math.random() * 6 };
+      }
+      return null;
+    }
+
+    _popup(text, x, y, color) {
+      this.popups.push({ text, x, y, color: color || '#ffd86b', vy: -60, life: 1.0, age: 0 });
+    }
+
+    // Raytrace a single ray, recording bounces against walls & rect obstacles.
+    // Returns array of points: [start, hit1, ..., hitN+1] where the last is
+    // an approximate end past `maxLen` total distance.
+    _raycastBounces(x, y, dx, dy, maxBounces, maxLen) {
+      const points = [{ x, y }];
+      let remain = maxLen;
+      const minX = 30, minY = 30, maxX = W - 30, maxY = H - 30;
+      // Static rects to test against (walls treated separately as bounds)
+      const rects = this.obstacles.filter(o => !o.kind);  // skip portals
+      for (let b = 0; b <= maxBounces && remain > 0.5; b++) {
+        let bestT = remain, hitNx = 0, hitNy = 0;
+        // Walls
+        if (dx > 0) {
+          const t = (maxX - x) / dx;
+          if (t > 0.001 && t < bestT) { bestT = t; hitNx = -1; hitNy = 0; }
+        } else if (dx < 0) {
+          const t = (minX - x) / dx;
+          if (t > 0.001 && t < bestT) { bestT = t; hitNx = 1;  hitNy = 0; }
+        }
+        if (dy > 0) {
+          const t = (maxY - y) / dy;
+          if (t > 0.001 && t < bestT) { bestT = t; hitNx = 0; hitNy = -1; }
+        } else if (dy < 0) {
+          const t = (minY - y) / dy;
+          if (t > 0.001 && t < bestT) { bestT = t; hitNx = 0; hitNy = 1; }
+        }
+        // Rects (slab test; record nearest face normal)
+        for (const o of rects) {
+          // Compute per-axis enter / exit
+          const inv1 = dx === 0 ? -Infinity : (o.x - x) / dx;
+          const inv2 = dx === 0 ?  Infinity : (o.x + o.w - x) / dx;
+          const inv3 = dy === 0 ? -Infinity : (o.y - y) / dy;
+          const inv4 = dy === 0 ?  Infinity : (o.y + o.h - y) / dy;
+          const tx1 = Math.min(inv1, inv2), tx2 = Math.max(inv1, inv2);
+          const ty1 = Math.min(inv3, inv4), ty2 = Math.max(inv3, inv4);
+          const tEnter = Math.max(tx1, ty1);
+          const tExit  = Math.min(tx2, ty2);
+          if (tExit < tEnter || tExit < 0.001) continue;
+          if (tEnter > 0.001 && tEnter < bestT) {
+            bestT = tEnter;
+            // Determine which face (smaller-of-axis enter)
+            if (tx1 > ty1) { hitNx = dx > 0 ? -1 : 1; hitNy = 0; }
+            else           { hitNx = 0; hitNy = dy > 0 ? -1 : 1; }
+          }
+        }
+        // Advance to the hit point
+        x += dx * bestT; y += dy * bestT;
+        remain -= bestT;
+        points.push({ x, y });
+        // Reflect velocity off the surface normal
+        if (hitNx !== 0) dx = -dx;
+        if (hitNy !== 0) dy = -dy;
+        // If we hit nothing and consumed remaining length, we're done.
+        if (hitNx === 0 && hitNy === 0) break;
+      }
+      return points;
+    }
+
     update(dt) {
       if (this.phase === 'shop') { this._updateShop(dt); return; }
       if (this.phase === 'victory') return;
+
+      // Floating combo popups
+      for (const pp of this.popups) {
+        pp.age += dt;
+        pp.y += pp.vy * dt;
+        pp.vy *= Math.pow(0.5, dt);  // ease out
+      }
+      this.popups = this.popups.filter(pp => pp.age < pp.life);
+      // Portal idle anim
+      for (const p of this.portals) p.t = (p.t || 0) + dt;
 
       // Enemies drift + orbital obstacle motion + seeker logic
       for (const o of this.obstacles) {
@@ -175,9 +281,11 @@
         this.bullet = {
           x: this.player.x, y: this.player.y,
           vx: dx / L * speed, vy: dy / L * speed,
-          trail: []
+          trail: [],
+          portalCool: 0  // brief debounce after a portal teleport
         };
         this.fired = true;
+        this.shotStats = { kills: 0, bounces: 0, bestCombo: 0, bonus: 0 };
         this.sfx.play('fire');
         this.shake(3, 0.12);
       }
@@ -186,6 +294,7 @@
         const b = this.bullet;
         b.trail.push({ x: b.x, y: b.y });
         if (b.trail.length > 80) b.trail.shift();
+        if (b.portalCool > 0) b.portalCool -= dt;
         const steps = 4;
         for (let s = 0; s < steps; s++) {
           const d = dt / steps;
@@ -209,13 +318,32 @@
             }
           }
 
+          // Portals: teleport bullet to its pair (with brief debounce so it
+          // doesn't immediately re-enter the destination portal).
+          if (b.portalCool <= 0) {
+            for (const p of this.portals) {
+              if (Math.hypot(b.x - p.x, b.y - p.y) < p.r) {
+                const exit = p.pair;
+                // Place bullet on the far side of the destination portal,
+                // displaced along travel direction.
+                const sp = Math.hypot(b.vx, b.vy) || 1;
+                b.x = exit.x + (b.vx / sp) * (exit.r + 4);
+                b.y = exit.y + (b.vy / sp) * (exit.r + 4);
+                b.portalCool = 0.18;
+                this.sfx.play('bounce', { freq: 1320 });
+                this.particles.burst(p.x, p.y, 14, { color: '#a58aff', speed: 220, life: 0.5, size: 2 });
+                this.particles.burst(exit.x, exit.y, 14, { color: '#a58aff', speed: 220, life: 0.5, size: 2 });
+                break;
+              }
+            }
+          }
+
           for (const e of this.enemies) {
             if (!e.alive) continue;
             if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 3) {
               if (e.kind === 'shielded' && e.hp > 1 && !this.save.upgrades.power) {
                 e.hp--;
                 this.sfx.play('shield');
-                // deflect bullet
                 const dx = b.x - e.x, dy = b.y - e.y;
                 const dd = Math.hypot(dx, dy) || 1;
                 b.vx = dx/dd * 720; b.vy = dy/dd * 720;
@@ -226,11 +354,12 @@
               if (e.hp <= 0) {
                 e.alive = false;
                 this.addScore(100);
+                this.shotStats.kills++;
+                this._onShotKill(e);
                 this.particles.burst(e.x, e.y, 18, { color: e.color, speed: 200, life: 0.7 });
                 this.sfx.play('kill');
                 this.shake(4, 0.14);
                 this.flash(e.color, 0.05);
-                // splitter: spawn two minis
                 if (e.kind === 'splitter') {
                   for (let k = 0; k < 2; k++) {
                     this.enemies.push({
@@ -240,15 +369,15 @@
                     });
                   }
                 }
+              } else if (e.kind === 'boss' && !e.phase2 && e.hp <= e.maxHp / 2) {
+                this._enterBossPhase2(e);
               }
               if (this.pierceLeft > 0) {
                 this.pierceLeft--;
-                // pierce: don't stop bullet
                 continue;
               }
-              // kill bullet on first hit (unless pierce used)
               if (e.kind !== 'shielded' || this.save.upgrades.power) {
-                b.vx *= 0.6; b.vy *= 0.6; // slight slowdown
+                b.vx *= 0.6; b.vy *= 0.6;
               }
             }
           }
@@ -288,9 +417,49 @@
 
     bulletBounce() {
       this.bulletBounces++;
+      if (this.shotStats) this.shotStats.bounces++;
       this.bulletEnergy = 1 - (this.bulletBounces / this.maxBounces);
       this.sfx.play('bounce', { freq: 880 - this.bulletBounces * 60 });
       this.particles.burst(this.bullet.x, this.bullet.y, 4, { color: '#4fc8ff', speed: 100, life: 0.3, size: 2 });
+    }
+
+    _onShotKill(e) {
+      // Combo bonuses scale with kill chain in a single shot.
+      const k = this.shotStats.kills;
+      this.shotStats.bestCombo = Math.max(this.shotStats.bestCombo, k);
+      const tiers = { 2: { label: 'DOUBLE!', bonus: 50, color: '#7ae0ff' },
+                      3: { label: 'TRIPLE!', bonus: 150, color: '#ffd86b' },
+                      4: { label: 'QUAD!',   bonus: 300, color: '#ff4fd8' } };
+      const t = tiers[k] || (k >= 5 ? { label: 'INSANE!', bonus: 500 + (k - 5) * 200, color: '#ff7744' } : null);
+      if (t) {
+        this.shotStats.bonus += t.bonus;
+        this.addScore(t.bonus);
+        this._popup(t.label + ' +' + t.bonus, e.x, e.y - 24, t.color);
+        this.flash(t.color, 0.12);
+        this.shake(6, 0.18);
+      } else {
+        this._popup('+100', e.x, e.y - 14, '#ffffffcc');
+      }
+    }
+
+    _enterBossPhase2(e) {
+      e.phase2 = true;
+      this.flash('#ff7744', 0.25);
+      this.shake(8, 0.3);
+      this.sfx.play('boss', { freq: 80 });
+      this._popup('PHASE 2', e.x, e.y - e.r - 24, '#ff7744');
+      // Spawn two fast minions that orbit the boss and act as moving shields.
+      for (let k = -1; k <= 1; k += 2) {
+        this.enemies.push({
+          x: e.x + k * 60, y: e.y, r: 12,
+          vx: -k * 200, vy: k * 80,
+          alive: true, hp: 1,
+          kind: 'normal', color: '#ffaa66',
+          guard: e
+        });
+      }
+      // Speed up boss
+      e.vx *= 1.6; e.vy *= 1.6;
     }
 
     endLevel(won) {
@@ -353,21 +522,56 @@
         ctx.strokeRect(o.x, o.y, o.w, o.h);
       }
 
+      // Portals: linked pairs, glow + slow rotation
+      for (const p of this.portals) {
+        const pulse = 0.6 + Math.sin((p.t || 0) * 4) * 0.4;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.t || 0) * 0.8);
+        ctx.shadowColor = '#a58aff'; ctx.shadowBlur = 22 * pulse;
+        ctx.strokeStyle = '#a58aff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#ddd0ff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(0, 0, p.r - 6, 0, Math.PI * 1.2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, p.r - 6, Math.PI * 1.5, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+
       if (!this.fired) {
         const mx = Input.mouse.x, my = Input.mouse.y;
         const dx = mx - this.player.x, dy = my - this.player.y;
         const L = Math.hypot(dx, dy) || 1;
         const ax = dx / L, ay = dy / L;
-        ctx.save();
-        ctx.setLineDash([6, 6]);
-        ctx.strokeStyle = '#4fc8ff66'; ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(this.player.x + ax * 20, this.player.y + ay * 20);
-        // aim-assist draws extended & predictive first bounce
-        const range = this.save.upgrades.aim ? 900 : 300;
-        ctx.lineTo(this.player.x + ax * range, this.player.y + ay * range);
-        ctx.stroke();
-        ctx.restore();
+        if (this.save.upgrades.aim) {
+          // Real predictive aim: raytrace 3 bounces forward.
+          const points = this._raycastBounces(
+            this.player.x + ax * 18, this.player.y + ay * 18,
+            ax, ay, 3, 1400
+          );
+          ctx.save();
+          ctx.setLineDash([5, 5]);
+          ctx.strokeStyle = '#a58aff'; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Mark predicted bounce points
+          ctx.fillStyle = '#a58aff';
+          for (let i = 1; i < points.length - 1; i++) {
+            ctx.beginPath(); ctx.arc(points[i].x, points[i].y, 3, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.setLineDash([6, 6]);
+          ctx.strokeStyle = '#4fc8ff66'; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(this.player.x + ax * 20, this.player.y + ay * 20);
+          ctx.lineTo(this.player.x + ax * 300, this.player.y + ay * 300);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
 
       for (const e of this.enemies) {
@@ -383,13 +587,21 @@
         ctx.fillStyle = '#fff';
         ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.4, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
-        // boss hp bar
+        // boss hp bar + phase 2 fury ring
         if (e.kind === 'boss') {
           const pct = e.hp / e.maxHp;
           ctx.fillStyle = '#200';
           ctx.fillRect(e.x - 40, e.y - e.r - 16, 80, 5);
-          ctx.fillStyle = '#ff7744';
+          ctx.fillStyle = e.phase2 ? '#ff4fd8' : '#ff7744';
           ctx.fillRect(e.x - 40, e.y - e.r - 16, 80 * pct, 5);
+          if (e.phase2) {
+            const pulse = 0.6 + Math.sin(this.time * 6) * 0.4;
+            ctx.save();
+            ctx.strokeStyle = '#ff4fd8'; ctx.lineWidth = 2;
+            ctx.shadowColor = '#ff4fd8'; ctx.shadowBlur = 18 * pulse;
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 8, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
+          }
         }
       }
 
@@ -419,13 +631,46 @@
       ctx.fillStyle = this.bulletEnergy > 0.3 ? '#4fc8ff' : '#f87171';
       ctx.fillRect(30, H - 16, (W - 60) * this.bulletEnergy, 6);
 
-      if (this.levelResult) {
-        ctx.fillStyle = this.levelResult === 'won' ? '#4ade80dd' : '#f87171dd';
-        ctx.fillRect(0, H / 2 - 40, W, 80);
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 36px ui-monospace, monospace';
+      // Floating combo popups (drawn above world, below result)
+      for (const pp of this.popups) {
+        const a = Math.max(0, 1 - pp.age / pp.life);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = pp.color;
+        ctx.font = 'bold 16px ui-monospace, monospace';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(this.levelResult === 'won' ? 'LEVEL CLEAR' : 'RETRY', W/2, H/2);
+        ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+        ctx.fillText(pp.text, pp.x, pp.y);
+        ctx.restore();
+      }
+
+      if (this.levelResult) {
+        // Summary card — kills, bounces, combo, bonus
+        const won = this.levelResult === 'won';
+        const cardW = 360, cardH = 168;
+        const cx = W / 2 - cardW / 2, cy = H / 2 - cardH / 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#0a1828';
+        ctx.fillRect(cx, cy, cardW, cardH);
+        ctx.strokeStyle = won ? '#4ade80' : '#f87171'; ctx.lineWidth = 3;
+        ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
+        ctx.fillStyle = won ? '#4ade80' : '#f87171';
+        ctx.font = 'bold 26px ui-monospace, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(won ? 'LEVEL ' + this.level + ' CLEAR' : 'RETRY', W/2, cy + 14);
+        ctx.fillStyle = '#cfe8ff';
+        ctx.font = '13px ui-monospace, monospace';
+        const s = this.shotStats;
+        const lines = [
+          'Kills    ' + s.kills,
+          'Bounces  ' + s.bounces,
+          'Best combo  x' + Math.max(1, s.bestCombo),
+          'Combo bonus  +' + s.bonus
+        ];
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], W/2, cy + 56 + i * 22);
+        }
       }
     }
 

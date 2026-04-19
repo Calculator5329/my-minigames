@@ -51,8 +51,12 @@
       id: 'lead', label: 'Lead', color: '#7080a0',
       apply(e) { e.hp = Math.round(e.hp * 1.1); e.maxHp = e.hp; e.lead = true; },
       damageMul(e, src) {
+        // Explosive / heavy ordnance penetrates lead casing. Energy and
+        // pure kinetic do not. Mortar shells are HE and bypass alongside
+        // cannon/missile.
         const ok = src === 'cannon' || src === 'missile' || src === 'flare' ||
-                   src === 'sing'   || src === 'tesla-burst' || src === 'cryo-shatter';
+                   src === 'sing'   || src === 'mortar'  ||
+                   src === 'tesla-burst' || src === 'cryo-shatter';
         return ok ? 1 : 0.15;
       },
       draw(ctx, e, time) {

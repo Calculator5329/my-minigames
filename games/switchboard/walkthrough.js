@@ -16,14 +16,22 @@
       visited: false,
       figureX: i * ROOM_W + W * 0.55,
       figureY: FLOOR_Y - 40,
+      figureFacing: -1,            // figures start facing away from player
+      figureWatching: 0,           // 0..1 — turns to look at you when you arrive
       lineIdx: 0,
       lineCd: 0,
-      spoken: []
+      spoken: [],
+      candle: 0.6 + Math.random() * 0.4,   // per-room flicker phase seed
+      // Pre-seed dust motes per room
+      motes: Array.from({ length: 14 }, () => ({
+        x: Math.random() * W, y: Math.random() * FLOOR_Y, s: 0.5 + Math.random() * 1.2,
+        v: 6 + Math.random() * 12
+      }))
     }));
     return {
       n5,
       rooms,
-      player: { x: 80, y: FLOOR_Y - 20, vx: 0, facing: 1 },
+      player: { x: 80, y: FLOOR_Y - 20, vx: 0, facing: 1, walkPhase: 0 },
       camX: 0,
       t: 0,
       flags,
@@ -49,18 +57,24 @@
     }
 
     const p = w.player;
-    // Movement (one axis — this is a side-view walking hall)
     let ax = 0;
     if (Input.keys['ArrowLeft']  || Input.keys['a'] || Input.keys['A']) ax -= 1;
     if (Input.keys['ArrowRight'] || Input.keys['d'] || Input.keys['D']) ax += 1;
     p.vx = ax * 190;
     p.x = Math.max(40, Math.min(w.rooms.length * ROOM_W - 40, p.x + p.vx * dt));
     if (ax !== 0) p.facing = ax > 0 ? 1 : -1;
+    p.walkPhase += Math.abs(p.vx) * dt * 0.02;
     w.camX = Math.max(0, Math.min((w.rooms.length - 1) * ROOM_W, Math.floor(p.x / ROOM_W) * ROOM_W));
 
-    // Interact with the figure nearest to player
+    // Interact with the figure nearest to player and animate figure turning
+    // toward the player while inside the conversation radius.
     for (const r of w.rooms) {
-      if (Math.abs(p.x - r.figureX) < 90) {
+      const dist = Math.abs(p.x - r.figureX);
+      const inside = dist < 90;
+      const target = inside ? 1 : 0;
+      r.figureWatching += (target - r.figureWatching) * Math.min(1, dt * 2.4);
+      if (inside) {
+        r.figureFacing = (p.x < r.figureX) ? -1 : 1;
         if (!r.visited) {
           r.visited = true;
           r.lineCd = 0;
@@ -71,8 +85,13 @@
           voicesHooks.speak(r.voice, text, `walk_${r.name.toLowerCase()}_${r.lineIdx}`);
           r.spoken.push(text);
           r.lineIdx++;
-          r.lineCd = 4.2;
+          r.lineCd = 4.6;
         }
+      }
+      for (const m of r.motes) {
+        m.y += m.v * dt;
+        m.x += Math.sin(w.t * 0.6 + m.s) * dt * 4;
+        if (m.y > FLOOR_Y) { m.y = -4; m.x = Math.random() * W; }
       }
     }
 
@@ -108,18 +127,33 @@
     ctx.translate(-w.camX, 0);
 
     for (const r of w.rooms) {
+      // Per-room candle flicker controls the wall light
+      const flicker = 0.85 + 0.15 * Math.sin(w.t * (4 + r.candle) + r.candle * 7) +
+                      (Math.random() < 0.02 ? -0.4 : 0);
+      const lightFloor = `rgba(40,22,18,${(0.85 * Math.max(0.4, flicker)).toFixed(2)})`;
+
       // Room floor
-      ctx.fillStyle = '#2a1a1a';
+      ctx.fillStyle = '#1a0d0d';
+      ctx.fillRect(r.x, FLOOR_Y, ROOM_W, H - FLOOR_Y);
+      ctx.fillStyle = lightFloor;
       ctx.fillRect(r.x, FLOOR_Y, ROOM_W, H - FLOOR_Y);
       // Wallpaper
       const wall = ctx.createLinearGradient(r.x, 0, r.x, FLOOR_Y);
-      wall.addColorStop(0, '#1a0e14'); wall.addColorStop(1, '#2a1c20');
+      wall.addColorStop(0, '#0e070a');
+      wall.addColorStop(0.6, '#1a0e14');
+      wall.addColorStop(1, '#2a1c20');
       ctx.fillStyle = wall; ctx.fillRect(r.x, 0, ROOM_W, FLOOR_Y);
       // Wallpaper stripes
-      ctx.strokeStyle = 'rgba(90,50,60,0.25)'; ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(90,50,60,0.22)'; ctx.lineWidth = 1;
       for (let gx = r.x + 20; gx < r.x + ROOM_W; gx += 18) {
         ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, FLOOR_Y); ctx.stroke();
       }
+      // Faint candle pool of light around the figure
+      const cx = r.figureX, cy = FLOOR_Y - 70;
+      const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 220);
+      grad.addColorStop(0, `rgba(255,200,120,${(0.13 * flicker).toFixed(3)})`);
+      grad.addColorStop(1, 'rgba(255,200,120,0)');
+      ctx.fillStyle = grad; ctx.fillRect(r.x, 0, ROOM_W, FLOOR_Y);
       // Baseboard
       ctx.fillStyle = '#140a0c';
       ctx.fillRect(r.x, FLOOR_Y - 4, ROOM_W, 4);
@@ -128,6 +162,15 @@
       if (r !== w.rooms[w.rooms.length - 1]) {
         ctx.fillStyle = '#050203';
         ctx.fillRect(r.x + ROOM_W - 32, FLOOR_Y - 150, 32, 150);
+        // Door frame highlight
+        ctx.strokeStyle = '#2a1018'; ctx.lineWidth = 2;
+        ctx.strokeRect(r.x + ROOM_W - 32 + 0.5, FLOOR_Y - 150 + 0.5, 32, 150);
+      }
+
+      // Dust motes
+      ctx.fillStyle = 'rgba(220,200,160,0.18)';
+      for (const m of r.motes) {
+        ctx.fillRect(r.x + m.x % ROOM_W, m.y, m.s, m.s);
       }
 
       // Room name plate
@@ -142,9 +185,10 @@
       drawFigure(ctx, r);
 
       // Spoken lines floating above
-      let dy = FLOOR_Y - 90;
+      let dy = FLOOR_Y - 100;
       for (let i = Math.max(0, r.spoken.length - 3); i < r.spoken.length; i++) {
-        ctx.fillStyle = 'rgba(220,200,180,0.75)';
+        const age = (r.spoken.length - 1 - i);
+        ctx.fillStyle = `rgba(220,200,180,${(0.85 - age * 0.22).toFixed(2)})`;
         ctx.font = '11px ui-monospace, monospace';
         ctx.textAlign = 'center';
         ctx.fillText('"' + r.spoken[i] + '"', r.figureX, dy);
@@ -199,14 +243,25 @@
 
   function drawFigure(ctx, r) {
     const fx = r.figureX, fy = r.figureY;
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath(); ctx.ellipse(fx, fy + 4, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+    // Body
     ctx.fillStyle = '#1a1014';
-    ctx.fillRect(fx - 10, fy - 32, 20, 24);          // body
+    ctx.fillRect(fx - 10, fy - 32, 20, 24);
+    // Head — a touch of pallor on the side facing the player
     ctx.fillStyle = '#d8c0a4';
-    ctx.fillRect(fx - 7, fy - 42, 14, 12);           // head
+    ctx.fillRect(fx - 7, fy - 42, 14, 12);
     ctx.fillStyle = '#3a2a20';
-    ctx.fillRect(fx - 8, fy - 46, 16, 4);            // hair cap
+    ctx.fillRect(fx - 8, fy - 46, 16, 4);
+    // Eye glints — only visible while watching the player
+    if (r.figureWatching > 0.05) {
+      const ex = fx + r.figureFacing * 2;
+      ctx.fillStyle = `rgba(255,236,122,${(0.35 + r.figureWatching * 0.55).toFixed(2)})`;
+      ctx.fillRect(ex - 1, fy - 38, 2, 2);
+      ctx.fillRect(ex + (r.figureFacing > 0 ? 3 : -5), fy - 38, 2, 2);
+    }
 
-    // Subtle distinguishing detail per voice
     switch (r.voice) {
       case 'crane':
         ctx.fillStyle = '#5aa0a0';

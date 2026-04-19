@@ -93,10 +93,16 @@
   };
 
   // ---------- Particle system ----------
+  // Hard cap on simultaneous particles. Purely cosmetic — over the cap we
+  // silently drop new emits, which keeps mass-death moments from spiking
+  // GC + render time without changing any gameplay-visible state.
+  const PARTICLE_CAP = 600;
+
   class ParticleSystem {
     constructor() { this.list = []; }
 
     emit(opts) {
+      if (this.list.length >= PARTICLE_CAP) return null;
       // opts: x,y,vx,vy,ax,ay,life,size,color,fade,shrink,gravity,shape
       const p = {
         x: opts.x || 0, y: opts.y || 0,
@@ -131,16 +137,28 @@
     }
 
     update(dt) {
-      for (let i = this.list.length - 1; i >= 0; i--) {
-        const p = this.list[i];
+      // Compact in place via swap-and-pop: dead particles are overwritten
+      // by the live one at the tail, then the tail is popped. O(1) removal
+      // per particle vs splice's O(n) shift — matters once the list is
+      // hundreds long, which mass deaths in late freeplay can produce.
+      const list = this.list;
+      let n = list.length;
+      for (let i = 0; i < n; ) {
+        const p = list[i];
         p.age += dt;
-        if (p.age >= p.life) { this.list.splice(i, 1); continue; }
+        if (p.age >= p.life) {
+          list[i] = list[n - 1];
+          n--;
+          continue;
+        }
         p.vx += (p.ax || 0) * dt;
         p.vy += ((p.ay || 0) + (p.gravity || 0)) * dt;
         if (p.drag) { p.vx *= (1 - p.drag * dt); p.vy *= (1 - p.drag * dt); }
         p.x += p.vx * dt;
         p.y += p.vy * dt;
+        i++;
       }
+      list.length = n;
     }
 
     render(ctx) {

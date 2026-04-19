@@ -21,12 +21,44 @@
   let escalation = 0;        // 0..1, set by game.js per-night
   function setEscalation(x) { escalation = Math.max(0, Math.min(1, x)); }
 
+  /* Per-call baked transcript cache. The bake script writes the actual spoken
+     transcript to assets/switchboard/voices/<callId>.txt next to the wav.
+     The board reads getTranscript(callId) when rendering the caller card and
+     prefers it over the original script so the visible caption always lines
+     up with what the listener actually hears. We never block on it: if the
+     fetch hasn't resolved yet (or the file doesn't exist) the original line
+     is used. */
+  const transcripts = new Map();   // callId -> string | null
+  const transcriptFetches = new Map(); // callId -> Promise
+
+  function prefetchTranscript(callId) {
+    if (!callId) return;
+    if (transcripts.has(callId) || transcriptFetches.has(callId)) return;
+    const p = fetch(`assets/switchboard/voices/${callId}.txt`, { cache: 'force-cache' })
+      .then(r => r.ok ? r.text() : null)
+      .then(t => { transcripts.set(callId, t ? t.trim() : null); return t; })
+      .catch(() => { transcripts.set(callId, null); return null; });
+    transcriptFetches.set(callId, p);
+  }
+  function getTranscript(callId) {
+    if (!callId) return null;
+    return transcripts.get(callId) || null;
+  }
+
   const active = new Map();   // callId -> handle
   let ctx = null;             // shared AudioContext
   let masterGain = null;
   let convolver = null;       // shared room IR
   let analyser = null;
   let inited = false;
+
+  /* "Leaning in" — when the player holds L, all currently-playing voice
+     chains ramp their voice gain up; otherwise the voice drops to a muffled
+     bed level so the player has to commit to listening. */
+  let listening = false;
+  const VOICE_GAIN_LEAN  = 1.0;    // voice when leaning in
+  const VOICE_GAIN_MUTED = 0.08;   // voice when not leaning in
+  const liveChains = new Set();    // gated voice gain nodes currently playing
 
   function isMuted() {
     return NDP.Engine.Audio && NDP.Engine.Audio.isMuted && NDP.Engine.Audio.isMuted();
@@ -160,6 +192,16 @@
     const c = ensureCtx(); if (!c) return null;
 
     const input = c.createGain();          // user wires source -> input
+    /* `voiceGain` sits between the source and the rest of the voice chain.
+       For normal calls: holding L ramps it to ~1.0, releasing drops it to
+       ~0.08. The hiss / breath / crackle bed is wired straight to master so
+       the *call* is always present, but the *words* only come through when
+       leaning in. Whispers (opts.whisper) bypass the gate — they're already
+       low-volume ambient creeps and should be heard whether you lean in or
+       not. */
+    const voiceGain = c.createGain();
+    const gated = !opts.whisper;
+    voiceGain.gain.value = gated ? (listening ? VOICE_GAIN_LEAN : VOICE_GAIN_MUTED) : 1.0;
     const bp1 = c.createBiquadFilter(); bp1.type = 'highpass';
     const bp2 = c.createBiquadFilter(); bp2.type = 'lowpass';
     const lo = (profile.filter && profile.filter.lo) || 320;
@@ -176,9 +218,11 @@
     const wetMix = (profile.reverb || 0) + escalation * 0.2 + (opts.whisper ? 0.3 : 0);
     wet.gain.value = Math.min(0.85, wetMix);
 
-    input.connect(bp1); bp1.connect(bp2); bp2.connect(tube);
+    input.connect(voiceGain);
+    voiceGain.connect(bp1); bp1.connect(bp2); bp2.connect(tube);
     tube.connect(dry); dry.connect(masterGain);
     tube.connect(convolver); convolver.connect(wet); wet.connect(masterGain);
+    if (gated) liveChains.add(voiceGain);
 
     // Per-call ambient bed (hiss + breath + crackle), routed dry to master
     const hissAmt = (profile.hiss || 0.08) + escalation * 0.12 + (opts.whisper ? 0.10 : 0);
@@ -197,10 +241,33 @@
         try { hiss.src.stop(); } catch (e) {}
         crackle.stop();
         breath.stop();
-        try { input.disconnect(); bp1.disconnect(); bp2.disconnect(); tube.disconnect(); dry.disconnect(); wet.disconnect(); } catch (e) {}
+        try { input.disconnect(); voiceGain.disconnect(); bp1.disconnect(); bp2.disconnect(); tube.disconnect(); dry.disconnect(); wet.disconnect(); } catch (e) {}
         try { hiss.gain.disconnect(); breath.gain.disconnect(); crackle.gain.disconnect(); } catch (e) {}
+        liveChains.delete(voiceGain);
       }
     };
+  }
+
+  /* Smooth-ramp every active voice gain when the player presses / releases L.
+     Also pause/resume SpeechSynthesis so the SS fallback respects listening
+     too (SS doesn't support live volume changes, so pause is the closest we
+     can get). */
+  function setListening(on) {
+    on = !!on;
+    if (on === listening) return;
+    listening = on;
+    const c = ctx;
+    if (c) {
+      const t = c.currentTime;
+      const target = on ? VOICE_GAIN_LEAN : VOICE_GAIN_MUTED;
+      for (const g of liveChains) {
+        try {
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(g.gain.value, t);
+          g.gain.linearRampToValueAtTime(target, t + 0.12);
+        } catch (e) { g.gain.value = target; }
+      }
+    }
   }
 
   /* Try a baked file; return a Promise of an HTMLAudioElement that began
@@ -232,6 +299,7 @@
      line = { voice, text } */
   function play(callId, line) {
     stop(callId);
+    prefetchTranscript(callId);
     if (isMuted()) return { stop(){} };
     const profile = (SB.VOICES && SB.VOICES[line.voice]) || (SB.VOICES && SB.VOICES.you) || null;
     if (!profile) return { stop(){} };
@@ -270,10 +338,17 @@
           audio.connect && audio.connect(chain.input);
         }
       }
-      audio.play().catch(() => fallbackSS());
-    }).catch(() => fallbackSS());
+      // Tear the chain down once the file plays through naturally so dead
+      // voiceGains don't accumulate in the listen-gate registry.
+      audio.addEventListener('ended', () => stop(callId), { once: true });
+      audio.play().catch(() => fallbackSS(false));
+    }).catch(() => fallbackSS(false));
 
     function fallbackSS() {
+      // SpeechSynthesis is fallback-only (the bake covers every line). The
+      // L gate doesn't apply here — SS has a single global queue and
+      // pause/resume would punish whispers that play during the same call,
+      // so we just speak the line at normal volume.
       if (stopped || !window.speechSynthesis) return;
       try {
         const u = new SpeechSynthesisUtterance(line.text);
@@ -285,12 +360,10 @@
           const en = voices.find(v => /en[-_]/i.test(v.lang)) || voices[0];
           u.voice = en;
         }
-        // Note: SS audio cannot be routed through Web Audio in most browsers,
-        // so the chain gives us only the parallel hiss/breath/crackle bed
-        // around the SS voice, which is still a substantial improvement.
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(u);
         ssUtter = u;
+        u.addEventListener('end', () => stop(callId), { once: true });
       } catch (e) {}
     }
 
@@ -314,6 +387,7 @@
      whisper_<callId> so the generator can voice it specially if desired. */
   function whisper(callId, line) {
     stop(callId);
+    prefetchTranscript(callId);
     if (isMuted()) return { stop(){} };
     const profile = (SB.VOICES && SB.VOICES[line.voice]) || (SB.VOICES && SB.VOICES.you) || null;
     if (!profile) return { stop(){} };
@@ -349,6 +423,7 @@
           bakedSource.connect(chain.input);
         } catch (e) {}
       }
+      audio.addEventListener('ended', () => stop(callId), { once: true });
       audio.play().catch(() => fallbackSS());
     }).catch(() => fallbackSS());
 
@@ -361,6 +436,7 @@
         u.volume = 0.45;
         window.speechSynthesis.speak(u);
         ssUtter = u;
+        u.addEventListener('end', () => stop(callId), { once: true });
       } catch (e) {}
     }
 
@@ -397,5 +473,9 @@
     }
   }
 
-  SB.Voices = { play, stop, stopAll, whisper, ring, pickupBlip, setEscalation };
+  SB.Voices = {
+    play, stop, stopAll, whisper, ring, pickupBlip,
+    setEscalation, setListening,
+    prefetchTranscript, getTranscript
+  };
 })();

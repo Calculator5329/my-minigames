@@ -1,17 +1,34 @@
 #!/usr/bin/env node
 /* Generate baked TTS voice samples for 418 Linden.
 
-   Usage:
-     TTS_API_KEY=sk-... node scripts/generate-voices.js
-     TTS_PROVIDER=elevenlabs TTS_API_KEY=... node scripts/generate-voices.js
-     TTS_PROVIDER=openai TTS_API_KEY=... node scripts/generate-voices.js
+   Providers (set TTS_PROVIDER):
+     openrouter  — OpenRouter, model openai/gpt-audio-mini (cheap), with full
+                   per-character voice-direction prompts. NOTE: OpenAI audio
+                   models on OpenRouter route through OpenAI; if your account
+                   has a BYOK OpenAI key configured with "Always use this key",
+                   that key is used. If it is invalid/expired you must fix it
+                   in https://openrouter.ai/settings/integrations or the
+                   request will 401. Reads OPENROUTER_API_KEY (or TTS_API_KEY).
+     openai      — Direct OpenAI tts-1 (no voice direction). TTS_API_KEY.
+     elevenlabs  — Direct ElevenLabs. TTS_API_KEY.
 
-   Reads the call script by regex-parsing games/switchboard/content.js so we
-   don't need a build step. Writes MP3s to assets/switchboard/voices/<id>.mp3.
-   If a file already exists, it's skipped (pass --force to regenerate).
+   Reads the call script + voice profiles by parsing games/switchboard/content.js
+   so we don't need a build step. Writes WAVs (or MP3s, per provider) to
+   assets/switchboard/voices/<id>.<ext>. Existing files are skipped unless
+   --force is passed.
 
-   Provider-specific voice mapping is in VOICE_MAP below — tweak to taste.
-   Add --dry to print the list of lines without calling the API. */
+   Useful flags:
+     --dry             list lines without calling any API
+     --force           regenerate even if file exists
+     --night N         only generate Night N (1..5)
+     --voice <key>     only generate this voice key (e.g. halberd)
+     --whisper         also bake whisper variants for dead-line lines
+     --model <id>      override OpenRouter model id
+
+   Usage examples:
+     OPENROUTER_API_KEY=sk-or-... node scripts/generate-voices.js
+     OPENROUTER_API_KEY=sk-or-... node scripts/generate-voices.js --night 1 --voice halberd
+*/
 
 const fs = require('fs');
 const path = require('path');
@@ -20,100 +37,177 @@ const https = require('https');
 const ROOT = path.resolve(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'assets', 'switchboard', 'voices');
 const CONTENT = path.join(ROOT, 'games', 'switchboard', 'content.js');
-const FORCE = process.argv.includes('--force');
-const DRY = process.argv.includes('--dry');
-const PROVIDER = process.env.TTS_PROVIDER || 'elevenlabs';
-const KEY = process.env.TTS_API_KEY;
 
-/* Per-voice hints per provider. These are suggestions — override in ENV:
-   VOICE_halberd=abc123, etc. */
+const argv = process.argv.slice(2);
+const FORCE = argv.includes('--force');
+const DRY = argv.includes('--dry');
+const WHISPERS = argv.includes('--whisper');
+const PROVIDER = process.env.TTS_PROVIDER || 'openrouter';
+const KEY = process.env.OPENROUTER_API_KEY || process.env.TTS_API_KEY;
+const NIGHT_FILTER = numArg('--night');
+const VOICE_FILTER = strArg('--voice');
+const MODEL_OVERRIDE = strArg('--model');
+
+function numArg(name) {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] ? Number(argv[i + 1]) : null;
+}
+function strArg(name) {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : null;
+}
+
+/* Per-provider voice/voiceId map. The OpenRouter `voice` is whatever the
+   underlying OpenAI gpt-audio model accepts. We then pass per-character
+   direction notes via the system prompt. */
 const VOICE_MAP = {
-  elevenlabs: {
-    halberd: 'EXAVITQu4vr4xnSDxMaL',     // Bella-ish (warm older woman)
-    child:   'jsCqWAovK2LkecY7zXl4',     // Freya (young)
-    crane:   'VR6AewLTigWG4xSOukaG',     // Arnold (upbeat male)
-    doctor:  'onwK4e9ZLuTAKqWW03F9',     // Daniel (British clinical)
-    weatherman: 'CYw3kZ02Hs0563khs1Fj',  // Dave (radio)
-    you:     'pNInz6obpgDQGcFmaJgB',     // Adam (neutral)
-    grocer:  'TxGEqnHWrfWFTfGW9XjX',     // Josh
-    cabbie:  'AZnzlk1XvdvUeBnXmlld',     // Domi
-    ma:      'ThT5KcBeYPX3keUQqHPh',     // Dorothy
-    receptionist: 'XB0fDUnXU5powFXDhCwa' // Charlotte
+  openrouter: {
+    halberd:'shimmer', child:'nova', crane:'onyx', doctor:'echo',
+    weatherman:'fable', you:'alloy', grocer:'onyx', cabbie:'nova',
+    ma:'shimmer', receptionist:'alloy', operator2:'shimmer', stranger:'echo'
   },
   openai: {
     halberd:'shimmer', child:'nova', crane:'onyx', doctor:'echo',
     weatherman:'fable', you:'alloy', grocer:'onyx', cabbie:'nova',
-    ma:'shimmer', receptionist:'alloy'
+    ma:'shimmer', receptionist:'alloy', operator2:'shimmer', stranger:'echo'
+  },
+  elevenlabs: {
+    halberd: 'EXAVITQu4vr4xnSDxMaL', child: 'jsCqWAovK2LkecY7zXl4',
+    crane:   'VR6AewLTigWG4xSOukaG', doctor: 'onwK4e9ZLuTAKqWW03F9',
+    weatherman: 'CYw3kZ02Hs0563khs1Fj', you: 'pNInz6obpgDQGcFmaJgB',
+    grocer:  'TxGEqnHWrfWFTfGW9XjX', cabbie: 'AZnzlk1XvdvUeBnXmlld',
+    ma:      'ThT5KcBeYPX3keUQqHPh', receptionist: 'XB0fDUnXU5powFXDhCwa',
+    operator2: 'EXAVITQu4vr4xnSDxMaL', stranger: 'onwK4e9ZLuTAKqWW03F9'
   }
 };
 
+/* Parse content.js to extract:
+   - VOICE_PROFILES: { voiceKey: { ttsHint, direction, voice } }
+   - LINES: [ { id, night, voice, text } ]
+   - WHISPER_LINES: those with onDeadLine: true */
 function parseContent() {
   const src = fs.readFileSync(CONTENT, 'utf8');
-  /* Extract all { at: N, voice: 'x', request: ..., text: '...' } occurrences.
-     We also grab Night 5 walkthrough lines and ending lines. */
-  const out = [];
-  const callRE = /\{\s*at:\s*(\d+)[^}]*?voice:\s*'(\w+)'[^}]*?text:\s*'((?:[^'\\]|\\.)*)'/gs;
-  let m;
-  // Night index tracking — rough: count `id: N` occurrences for nights.
-  const nightOrder = [];
-  const idRE = /id:\s*(\d+)/g;
-  while ((m = idRE.exec(src))) nightOrder.push({ id: Number(m[1]), pos: m.index });
 
-  let nightIdx = 0;
-  while ((m = callRE.exec(src))) {
-    // Determine night by nearest preceding `id: N`
-    while (nightIdx + 1 < nightOrder.length && nightOrder[nightIdx + 1].pos < m.index) nightIdx++;
-    const nightId = nightOrder[nightIdx] ? nightOrder[nightIdx].id : 1;
-    const idx = out.filter(o => o.night === nightId).length;
-    out.push({
-      id: `n${nightId}_c${idx}`,
-      night: nightId,
-      voice: m[2],
-      text: m[3].replace(/\\'/g, "'").replace(/\\"/g, '"')
-    });
+  // Extract voice profile direction hints. Look for blocks shaped like:
+  //   foo: { ... ttsHint: '...', direction: '...' ... }
+  const profiles = {};
+  const profRE = /(\w+):\s*\{[\s\S]*?ttsHint:\s*'((?:[^'\\]|\\.)*)'[\s\S]*?direction:\s*'((?:[^'\\]|\\.)*)'/g;
+  let pm;
+  while ((pm = profRE.exec(src))) {
+    profiles[pm[1]] = {
+      ttsHint: unescape(pm[2]),
+      direction: unescape(pm[3])
+    };
   }
 
-  // Walkthrough lines — inside SB.NIGHT5.rooms, scraped by room.
-  const roomBlockRE = /name:\s*'([^']+)',\s*description:[^,]+,\s*figure:[^,]+,\s*voice:\s*'(\w+)',\s*lines:\s*\[([\s\S]*?)\]/g;
-  while ((m = roomBlockRE.exec(src))) {
-    const room = m[1].toLowerCase();
-    const voice = m[2];
-    const lineRE = /'((?:[^'\\]|\\.)*)'/g;
-    let lm, lineIdx = 0;
-    while ((lm = lineRE.exec(m[3]))) {
+  const out = [];
+
+  // Calls per night. Each call object spans multiple lines and includes
+  // optional onDeadLine: true and optional 'flag' or 'critical' keys.
+  // We split content into per-night chunks first.
+  const nightBlockRE = /\{\s*id:\s*(\d+),\s*durationSec:[\s\S]*?calls:\s*\[([\s\S]*?)\],?\s*deadlineNote/g;
+  let nm;
+  while ((nm = nightBlockRE.exec(src))) {
+    const nightId = Number(nm[1]);
+    const block = nm[2];
+    const callRE = /\{\s*at:\s*\d+[^}]*?voice:\s*'(\w+)'[^}]*?text:\s*'((?:[^'\\]|\\.)*)'(?:[^}]*?(onDeadLine:\s*true))?[^}]*?\}/g;
+    let cm, idx = 0;
+    while ((cm = callRE.exec(block))) {
+      const voice = cm[1];
+      const text = unescape(cm[2]);
+      const isDead = !!cm[3];
       out.push({
-        id: `walk_${room}_${lineIdx}`,
-        night: 5,
-        voice,
-        text: lm[1].replace(/\\'/g, "'")
+        id: `n${nightId}_c${idx}`,
+        night: nightId, voice, text, isDead
       });
-      lineIdx++;
+      if (isDead && WHISPERS) {
+        out.push({
+          id: `whisper_n${nightId}_c${idx}`,
+          night: nightId, voice, text, isWhisper: true
+        });
+      }
+      idx++;
     }
   }
 
-  // Ending narration (voice: 'you')
-  const endingsRE = /endings:\s*\{([\s\S]*?)\}\s*\}/;
-  const em = src.match(endingsRE);
-  if (em) {
+  // Walkthrough room lines (Night 5). Description and figure may contain
+  // commas, so we match by string boundaries instead of comma-stops.
+  const roomBlockRE = /name:\s*'([^']+)',\s*description:\s*'(?:[^'\\]|\\.)*',\s*figure:\s*'(?:[^'\\]|\\.)*',\s*voice:\s*'(\w+)',\s*lines:\s*\[([\s\S]*?)\]/g;
+  let rm;
+  while ((rm = roomBlockRE.exec(src))) {
+    const room = rm[1].toLowerCase();
+    const voice = rm[2];
+    const lineRE = /'((?:[^'\\]|\\.)*)'/g;
+    let lm, lineIdx = 0;
+    while ((lm = lineRE.exec(rm[3]))) {
+      out.push({
+        id: `walk_${room}_${lineIdx++}`,
+        night: 5, voice, text: unescape(lm[1])
+      });
+    }
+  }
+
+  // Endings narration (voice: 'you'). The endings block sits inside NIGHT5;
+  // the file ends with closing braces for endings, NIGHT5, and the IIFE,
+  // so just grab everything up to the first stray "}" line at minimum nesting.
+  const endingsStart = src.indexOf('endings:');
+  if (endingsStart > 0) {
+    // Find matching close brace by depth-tracking from the first '{' after endings:
+    const open = src.indexOf('{', endingsStart);
+    let depth = 0, end = -1;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    const endingsBlock = end > 0 ? src.slice(open + 1, end) : '';
     const blockRE = /(\w+):\s*\[([\s\S]*?)\]/g;
     let bm;
-    while ((bm = blockRE.exec(em[1]))) {
+    while ((bm = blockRE.exec(endingsBlock))) {
       const key = bm[1];
       const lineRE = /'((?:[^'\\]|\\.)*)'/g;
       let lm, i = 0;
       while ((lm = lineRE.exec(bm[2]))) {
         out.push({
-          id: `ending_${key}_${i}`,
-          night: 5,
-          voice: 'you',
-          text: lm[1].replace(/\\'/g, "'")
+          id: `ending_${key}_${i++}`,
+          night: 5, voice: 'you', text: unescape(lm[1])
         });
-        i++;
       }
     }
   }
 
-  return out;
+  return { profiles, lines: out };
+}
+
+function unescape(s) {
+  return s.replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\n/g, '\n');
+}
+
+// Loose comparison so we only flag real drift, not punctuation/case nits.
+function normalize(s) {
+  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/* Wrap raw signed-16-bit little-endian PCM in a minimal RIFF/WAVE header so
+   the resulting file plays in any browser <audio> element. */
+function pcm16ToWav(pcm, sampleRate, channels) {
+  const byteRate = sampleRate * channels * 2;
+  const blockAlign = channels * 2;
+  const dataLen = pcm.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLen, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);          // PCM chunk size
+  header.writeUInt16LE(1, 20);           // PCM format
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(16, 34);          // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(dataLen, 40);
+  return Buffer.concat([header, pcm]);
 }
 
 function httpsPost(hostname, path, headers, body) {
@@ -123,7 +217,7 @@ function httpsPost(hostname, path, headers, body) {
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
         if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`));
+          return reject(new Error(`HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf8').slice(0, 400)}`));
         }
         resolve(Buffer.concat(chunks));
       });
@@ -134,66 +228,206 @@ function httpsPost(hostname, path, headers, body) {
   });
 }
 
-async function ttsElevenLabs(text, voiceId) {
+/* OpenRouter audio output is delivered via SSE stream. We collect all
+   delta.audio.data chunks and concatenate them into a base64 wav. */
+async function ttsOpenRouter(line, profile) {
+  const voiceId = process.env[`VOICE_${line.voice}`] || VOICE_MAP.openrouter[line.voice] || 'shimmer';
+  const model = MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || 'openai/gpt-audio-mini';
+  const hint = (profile && profile.ttsHint) || '';
+  const direction = (profile && profile.direction) || '';
+  const flavor = line.isWhisper
+    ? ' Whispered, very quiet, breathy, as if the receiver is buried in a pillow.'
+    : '';
+  const characterTag = [hint, direction, flavor].filter(Boolean).join(' ').trim();
+
+  // Structured prompt: tagging the script unambiguously makes gpt-audio-mini
+  // perform the line verbatim instead of treating it as a request to itself.
+  // Setting is established in the system prompt; per-take character is in the
+  // user message so direction can vary per line.
+  const systemPrompt = [
+    'You are an audiobook performer recording lines for a horror radio drama set at a 1923 telephone exchange, late at night, the line is degraded.',
+    'For each take, the user gives you the SCRIPT in <script> tags and the CHARACTER in <character> tags.',
+    'You are voicing the CALLER on the line, speaking INTO the telephone toward a switchboard operator. You are NOT the operator and you do NOT respond to the script.',
+    '',
+    'Hard rules:',
+    '- Perform the script aloud as the character, exactly as written.',
+    '- Read every word inside <script> in order, no paraphrase, no rewording.',
+    '- Do NOT add anything outside the script (no greetings, no continuations, no replies, no ad-libs, no "[pause]", no stage directions).',
+    '- Stop the moment you finish the last word of the script.'
+  ].join('\n');
+
+  const userMsg =
+    `<character>${characterTag || 'A speaker on a 1923 telephone line.'}</character>\n` +
+    `<script>${line.text}</script>`;
+
   const body = JSON.stringify({
-    text,
-    model_id: 'eleven_monolingual_v1',
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMsg }
+    ],
+    modalities: ['text', 'audio'],
+    // OpenAI gpt-audio streaming only supports pcm16. We wrap the raw
+    // 24kHz mono PCM in a minimal RIFF/WAVE header below.
+    audio: { voice: voiceId, format: 'pcm16' },
+    stream: true
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'openrouter.ai',
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + KEY,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://notdop.local',
+        'X-Title': '418 Linden',
+        'Accept': 'text/event-stream',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf8').slice(0, 500)}`)));
+        return;
+      }
+      let buf = '';
+      let audioB64 = '';
+      let transcript = '';
+      let firstError = null;
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buf += chunk;
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t.startsWith('data:')) continue;
+          const data = t.slice(5).trim();
+          if (data === '[DONE]') continue;
+          if (!data) continue;
+          try {
+            const j = JSON.parse(data);
+            if (j.error && !firstError) firstError = JSON.stringify(j.error).slice(0, 300);
+            const a = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.audio;
+            if (a && a.data) audioB64 += a.data;
+            if (a && a.transcript) transcript += a.transcript;
+          } catch (e) { /* keepalives */ }
+        }
+      });
+      res.on('end', () => {
+        if (firstError && !audioB64) return reject(new Error(firstError));
+        if (!audioB64) return reject(new Error('no audio chunks returned'));
+        const pcm = Buffer.from(audioB64, 'base64');
+        resolve({ buf: pcm16ToWav(pcm, 24000, 1), ext: 'wav', transcript: transcript.trim() });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function ttsOpenAI(line) {
+  const voiceId = process.env[`VOICE_${line.voice}`] || VOICE_MAP.openai[line.voice] || 'alloy';
+  const body = JSON.stringify({
+    model: 'tts-1', voice: voiceId, input: line.text, response_format: 'mp3'
+  });
+  const buf = await httpsPost('api.openai.com', '/v1/audio/speech', {
+    'Authorization': `Bearer ${KEY}`,
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body)
+  }, body);
+  return { buf, ext: 'mp3' };
+}
+
+async function ttsElevenLabs(line) {
+  const voiceId = process.env[`VOICE_${line.voice}`] || VOICE_MAP.elevenlabs[line.voice];
+  if (!voiceId) throw new Error('no eleven voice for ' + line.voice);
+  const body = JSON.stringify({
+    text: line.text, model_id: 'eleven_monolingual_v1',
     voice_settings: { stability: 0.55, similarity_boost: 0.75 }
   });
-  return httpsPost('api.elevenlabs.io', `/v1/text-to-speech/${voiceId}`, {
+  const buf = await httpsPost('api.elevenlabs.io', `/v1/text-to-speech/${voiceId}`, {
     'xi-api-key': KEY,
     'Content-Type': 'application/json',
     'Accept': 'audio/mpeg',
     'Content-Length': Buffer.byteLength(body)
   }, body);
+  return { buf, ext: 'mp3' };
 }
 
-async function ttsOpenAI(text, voiceId) {
-  const body = JSON.stringify({
-    model: 'tts-1',
-    voice: voiceId,
-    input: text,
-    response_format: 'mp3'
-  });
-  return httpsPost('api.openai.com', '/v1/audio/speech', {
-    'Authorization': `Bearer ${KEY}`,
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(body)
-  }, body);
-}
-
-const PROVIDER_FN = { elevenlabs: ttsElevenLabs, openai: ttsOpenAI };
+const PROVIDER_FN = {
+  openrouter: ttsOpenRouter,
+  openai: ttsOpenAI,
+  elevenlabs: ttsElevenLabs
+};
 
 (async () => {
-  const lines = parseContent();
-  console.log(`Parsed ${lines.length} lines from content.js.`);
+  const { profiles, lines } = parseContent();
+  const filtered = lines.filter(l =>
+    (!NIGHT_FILTER || l.night === NIGHT_FILTER) &&
+    (!VOICE_FILTER || l.voice === VOICE_FILTER));
+
+  console.log(`Parsed ${lines.length} total lines (${filtered.length} after filters).`);
+
   if (DRY) {
-    for (const l of lines) console.log(`  ${l.id} [${l.voice}] ${l.text.slice(0, 80)}`);
+    for (const l of filtered) {
+      const p = profiles[l.voice] || {};
+      console.log(`  [N${l.night}] ${l.id.padEnd(28)} ${l.voice.padEnd(12)} ${l.text.slice(0, 70)}`);
+      if (p.direction) console.log(`        DIR: ${p.direction.slice(0, 90)}…`);
+    }
     return;
   }
   if (!KEY) {
-    console.error('Set TTS_API_KEY (and optionally TTS_PROVIDER) and re-run. Game plays fine without — runtime will use SpeechSynthesis.');
+    console.error('Set OPENROUTER_API_KEY (or TTS_API_KEY) and re-run.');
+    console.error('Game still plays without baked audio — runtime falls back to SpeechSynthesis.');
     process.exit(1);
   }
   const fn = PROVIDER_FN[PROVIDER];
   if (!fn) { console.error('Unknown provider:', PROVIDER); process.exit(1); }
-  const map = VOICE_MAP[PROVIDER];
+
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   let ok = 0, fail = 0, skipped = 0;
-  for (const l of lines) {
-    const out = path.join(OUT_DIR, l.id + '.mp3');
-    if (!FORCE && fs.existsSync(out)) { skipped++; continue; }
-    const voiceId = process.env[`VOICE_${l.voice}`] || map[l.voice] || map.you;
+  for (const l of filtered) {
+    // Skip if any expected extension already exists
+    const existing = ['wav', 'mp3'].map(e => path.join(OUT_DIR, l.id + '.' + e)).find(fs.existsSync);
+    if (!FORCE && existing) { skipped++; continue; }
+    const profile = profiles[l.voice];
     try {
-      const buf = await fn(l.text, voiceId);
+      const { buf, ext, transcript } = await fn(l, profile);
+      const out = path.join(OUT_DIR, l.id + '.' + ext);
       fs.writeFileSync(out, buf);
-      console.log(`ok  : ${l.id} (${buf.length} bytes, ${l.voice})`);
+      // Save the actual spoken transcript next to the WAV so the runtime can
+      // display what was actually said instead of the original script. This
+      // keeps the caller-card text in lock-step with the audio even if the
+      // model occasionally drifts.
+      if (transcript) {
+        fs.writeFileSync(path.join(OUT_DIR, l.id + '.txt'), transcript);
+      }
+      const drift = transcript && normalize(transcript) !== normalize(l.text)
+        ? ' [drift]' : '';
+      console.log(`ok  : ${l.id.padEnd(28)} (${l.voice}, ${buf.length} bytes ${ext})${drift}`);
       ok++;
-      await new Promise(r => setTimeout(r, 120));  // gentle pacing
+      await new Promise(r => setTimeout(r, 150));
     } catch (e) {
-      console.log(`FAIL: ${l.id} - ${e.message}`);
+      console.log(`FAIL: ${l.id.padEnd(28)} (${l.voice}) - ${e.message}`);
       fail++;
+      // If the very first request fails with a credentials/BYOK error, bail
+      // early — no point burning quota on the same problem 60 times.
+      if (ok === 0 && /401|403|invalid_api_key|byok/i.test(e.message)) {
+        console.error('\nAborting: provider returned an auth error on the first call.');
+        console.error('If using openrouter and you see "Incorrect API key" referencing an');
+        console.error('OpenAI sk-proj key, you have a BYOK OpenAI key configured at');
+        console.error('https://openrouter.ai/settings/integrations that is invalid or');
+        console.error('expired. Disable "Always use this key" or update the BYOK key,');
+        console.error('then re-run.');
+        break;
+      }
     }
   }
   console.log(`\nDone. ok=${ok} fail=${fail} skipped=${skipped}`);

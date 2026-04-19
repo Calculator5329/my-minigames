@@ -58,19 +58,19 @@
       this.powerT = 0;
       this.power = 0;
 
-      // Run metrics
-      this.run = {
-        distance: 0, altitude: 0, maxAltitude: 0,
-        coins: 0, mult: 1.0, multT: 0,
-        time: 0, stunts: 0,
-        fuelUsed: 0, pickups: 0, hazardsHit: 0,
-        reachedSpace: false,
-        flipT: 0, flipCount: 0,
-        bossPunched: false
-      };
+      // Run metrics — see _newRun for the full LTF-style depth schema
+      this.run = this._newRun();
 
       // Current modifier (picked each workshop entry)
       this.modifier = this._pickModifier();
+
+      // Queue of medal-earned popups to render in flight + collect in report
+      this.medalPopups = [];
+      this.medalsEarnedThisRun = [];
+
+      // Periodic-pump cadence for distance / altitude / speed medals so
+      // we don't hammer LTH.checkMedalProgress every frame.
+      this._medalPumpT = 0;
 
       // Shop UI
       this.shopSel = 'ramp';
@@ -106,8 +106,59 @@
       return m[(Math.random() * m.length) | 0];
     }
 
+    // Single source of truth for run-scoped state. Keep this in sync with
+    // `_reset()`. New fields here should also be defaulted in any old-save
+    // migration in content.js.
+    _newRun() {
+      return {
+        distance: 0, altitude: 0, maxAltitude: 0,
+        coins: 0, mult: 1.0, multT: 0,
+        time: 0, stunts: 0,
+        fuelUsed: 0, pickups: 0, hazardsHit: 0,
+        reachedSpace: false,
+        flipT: 0, flipCount: 0,
+        bossPunched: false,
+
+        // ---- LTF-style depth pass (2026-04-19) ----
+        // ground-skip count for the Skipping Stones medal + Day 7 obj
+        skips: 0,
+        // run-best raw m/s (used for Speed Demon / Mach / Hypersonic medals)
+        peakSpeed: 0,
+        // distance flown since the last hazard hit (Pacifist medal)
+        noHazardsDist: 0, _noHazardsBaseX: 0,
+        // active boons, all decremented on real dt
+        slowT: 0,            // slow-time potion timer
+        slowFactor: 1,       // current world-time scalar
+        magnetT: 0,          // magnet potion timer
+        magnetBonus: 0,      // extra magnet radius while potion active
+        shielded: false,     // one-hit hazard shield
+        // distance flown after vault-punch (for Endless Wanderer medal)
+        postBossDist: 0, _postBossBaseX: 0,
+        // day grade is filled in by `_endRun` via LTH.gradeRun
+        dayGrade: null,
+        // medals newly earned this run; dumped into the report card
+        newMedals: []
+      };
+    }
+
     _applyStats() {
       this.stats = LTH.currentStats(this.save);
+    }
+
+    // Pump a value into the persistent medal tracker. Any newly earned
+    // medals get a coin payout, an in-flight popup, an SFX cue, and are
+    // remembered for the post-run report card.
+    _pumpMedal(kind, value) {
+      if (typeof LTH.checkMedalProgress !== 'function') return;
+      const earned = LTH.checkMedalProgress(this.save, kind, value);
+      if (!earned || !earned.length) return;
+      for (const m of earned) {
+        this.save.coins += m.reward | 0;
+        this.medalPopups.push({ medal: m, age: 0, life: 3.4 });
+        this.medalsEarnedThisRun.push(m);
+      }
+      this.sfx.play('unlock');
+      LTH.writeSave(this.save);
     }
 
     // ---------- phase transitions ----------
@@ -157,7 +208,7 @@
       if (this.run.maxAltitude > this.save.bestAltitude) this.save.bestAltitude = Math.round(this.run.maxAltitude);
       if (this.run.coins > this.save.bestCoins) this.save.bestCoins = this.run.coins;
 
-      // Check goals
+      // Check goals (legacy "10 goals" track stays alive — still drives stage tints)
       this.run.completedGoals = [];
       for (const g of LTH.GOALS) {
         if (this.save.goalsDone.indexOf(g.id) !== -1) continue;
@@ -169,6 +220,48 @@
           this.goalsCompletedThisRun++;
         }
       }
+
+      // ---- LTF-style depth pass: day grading ----
+      // Grade the run against the current campaign day (if any). Primary
+      // success advances dayIdx; bonus stacks reward without consuming a
+      // second day. Endless mode skips grading entirely.
+      let grade = null;
+      if (this.save.mode !== 'endless' && typeof LTH.gradeRun === 'function') {
+        grade = LTH.gradeRun(this.save, this.run);
+        this.run.dayGrade = grade;
+        if (grade.day && grade.primaryDone) {
+          this.save.coins += grade.dayReward;
+          this.save.dayIdx = Math.min(LTH.CAMPAIGN.length, this.save.dayIdx + 1);
+          // Day 15 victory unlocks Endless mode permanently.
+          if (this.run.bossPunched && !this.save.endlessUnlocked) {
+            this.save.endlessUnlocked = true;
+          }
+        }
+      }
+
+      // ---- end-of-run medal pumps for finalize-only kinds ----
+      const fuelLeftPct = (this.player.fuel || 0) / (this.stats.fuel || 1);
+      this._pumpMedal('time', this.run.time);
+      this._pumpMedal('fuelLeftPct', fuelLeftPct);
+      if (fuelLeftPct <= 0.001 && this.run.fuelUsed > 0) this._pumpMedal('fuelBurned', 1);
+      this._pumpMedal('noHazardsDist', this.run.noHazardsDist);
+      this._pumpMedal('distance', this.run.distance);
+      this._pumpMedal('altitude', this.run.maxAltitude);
+      this._pumpMedal('speed',    this.run.peakSpeed);
+      this._pumpMedal('coins',    this.run.coins);
+      if (this.run.bossPunched) this._pumpMedal('endlessDistance', this.run.postBossDist);
+
+      // ---- lifetime totals for the workshop STATS panel ----
+      const lt = this.save.lifetime;
+      lt.distance += Math.round(this.run.distance);
+      lt.altitude  = Math.max(lt.altitude, Math.round(this.run.maxAltitude));
+      lt.time     += this.run.time;
+      lt.coins    += this.run.coins;
+      lt.launches += 1;
+      if (this.run.bossPunched) lt.vaultPunches += 1;
+
+      // remember the medals earned this run for the report card
+      this.run.newMedals = (this.medalsEarnedThisRun || []).slice();
 
       // stage progression
       const doneCount = this.save.goalsDone.length;
@@ -192,9 +285,11 @@
     // this run is the most natural progress signal; victory bumps it to the
     // 25-50 calibration band described in the migration plan.
     coinsEarned() {
-      const goals = this.goalsCompletedThisRun | 0;
+      const goals  = this.goalsCompletedThisRun | 0;
+      const medals = (this.run && this.run.newMedals && this.run.newMedals.length) | 0;
+      const dayDone = (this.run && this.run.dayGrade && this.run.dayGrade.primaryDone) ? 1 : 0;
       const winBonus = this.victoryAchieved ? 25 : 0;
-      return goals * 5 + winBonus;
+      return goals * 5 + medals * 2 + dayDone * 4 + winBonus;
     }
 
     _goalProgress(g) {
@@ -211,6 +306,14 @@
 
     // ---------- update ----------
     update(dt) {
+      // Tick down medal popups everywhere except shop/medals/stats overlays
+      // so they fade away on their own without freezing on screen.
+      if (this.medalPopups && this.medalPopups.length) {
+        for (let i = this.medalPopups.length - 1; i >= 0; i--) {
+          this.medalPopups[i].age += dt;
+          if (this.medalPopups[i].age >= this.medalPopups[i].life) this.medalPopups.splice(i, 1);
+        }
+      }
       switch (this.phase) {
         case 'workshop': return this._updateWorkshop(dt);
         case 'aim':      return this._updateAim(dt);
@@ -218,6 +321,8 @@
         case 'flight':   return this._updateFlight(dt);
         case 'report':   return this._updateReport(dt);
         case 'shop':     return this._updateShop(dt);
+        case 'medals':   return this._updateMedals(dt);
+        case 'stats':    return this._updateStats(dt);
       }
     }
 
@@ -226,11 +331,37 @@
       if (Input.mouse.justPressed) { this.phase = 'aim'; this.aimMeterT = 0; }
       if (k[' '] || k['Space']) { this.phase = 'aim'; this.aimMeterT = 0; k[' '] = false; }
       if (k['s'] || k['S']) { this.prevPhase = 'workshop'; this.phase = 'shop'; k['s'] = false; k['S'] = false; }
+      if (k['m'] || k['M']) { this.prevPhase = 'workshop'; this.phase = 'medals'; k['m'] = false; k['M'] = false; }
+      if (k['t'] || k['T']) { this.prevPhase = 'workshop'; this.phase = 'stats'; k['t'] = false; k['T'] = false; }
       if (k['r'] || k['R']) {
         // reroll modifier
         this.modifier = this._pickModifier();
         k['r'] = false; k['R'] = false;
         this.sfx.play('tick');
+      }
+      // Mode toggle (only when endless is unlocked) — Tab swaps the
+      // workshop between the campaign track and the endless free-flight.
+      if (this.save.endlessUnlocked && (k['Tab'] || k['x'] || k['X'])) {
+        this.save.mode = this.save.mode === 'endless' ? 'campaign' : 'endless';
+        LTH.writeSave(this.save);
+        k['Tab'] = false; k['x'] = false; k['X'] = false;
+        this.sfx.play('unlock');
+      }
+    }
+
+    _updateMedals(dt) {
+      const k = Input.keys;
+      if (k['Escape'] || k['q'] || k['Q'] || k['m'] || k['M'] || Input.mouse.justPressed) {
+        this.phase = this.prevPhase || 'workshop';
+        k['Escape'] = false; k['q'] = false; k['Q'] = false; k['m'] = false; k['M'] = false;
+      }
+    }
+
+    _updateStats(dt) {
+      const k = Input.keys;
+      if (k['Escape'] || k['q'] || k['Q'] || k['t'] || k['T'] || Input.mouse.justPressed) {
+        this.phase = this.prevPhase || 'workshop';
+        k['Escape'] = false; k['q'] = false; k['Q'] = false; k['t'] = false; k['T'] = false;
       }
     }
 
@@ -260,6 +391,22 @@
       const p = this.player;
       const s = this.stats;
       const mod = this.modifier;
+      const realDt = dt;
+      // Slow-time potion: world physics + spawning + entity updates
+      // run at half speed for `slowT` seconds, but the timer itself
+      // counts down on real wall-clock dt so the effect ends on time.
+      if (this.run.slowT > 0) {
+        this.run.slowT = Math.max(0, this.run.slowT - realDt);
+        this.run.slowFactor = 0.5;
+        dt = realDt * 0.5;
+      } else {
+        this.run.slowFactor = 1;
+      }
+      // Magnet potion timer always runs on real time too.
+      if (this.run.magnetT > 0) {
+        this.run.magnetT = Math.max(0, this.run.magnetT - realDt);
+        if (this.run.magnetT <= 0) this.run.magnetBonus = 0;
+      }
       this.run.time += dt;
 
       // -----------------------------------------------------------
@@ -306,7 +453,10 @@
       // Lift coefficient: tiny base lift from the body shape, big boost
       // when the glider is deployed (scaled by glider tier). Lift scales
       // with speed² and a sin(AoA)-shaped curve that *stalls* past ~34°.
-      const baseLiftCoef = 0.0028 + (p.gliderOpen ? (s.lift || 0) * 0.020 : 0);
+      // Aero upgrades multiply both lift and drag baselines.
+      const liftMult = (s.liftMult || 1);
+      const dragMult = (s.dragMult || 1);
+      const baseLiftCoef = (0.0028 + (p.gliderOpen ? (s.lift || 0) * 0.020 : 0)) * liftMult;
       const STALL = 0.6;            // ~34°
       let liftShape;
       if (Math.abs(aoa) < STALL) {
@@ -322,7 +472,7 @@
       // Drag: small streamlined drag, plus a heavy broadside penalty.
       // Stalled = even more drag, which is what makes a stalled wing feel
       // like a brick.
-      const baseDrag = (s.drag || 0.012);
+      const baseDrag = (s.drag || 0.012) * dragMult;
       const broadside = 1 + Math.abs(aoa) * 2.4 + (Math.abs(aoa) > STALL ? 2.2 : 0);
       const dragMag = baseDrag * density * speed * speed * broadside * 0.0034;
 
@@ -411,6 +561,7 @@
           this._addFloat(p.x, p.y, '+50 STUNT', '#ff7ad8');
           this.run.coins += 50;
           this.sfx.play('ding');
+          this._pumpMedal('stunts', this.run.stunts);
         }
       } else {
         p._spinAccum = 0;
@@ -438,6 +589,8 @@
           p.vx *= 0.82;
           this.sfx.play('boing');
           if (Math.abs(p.vx) > 120) this._addFloat(p.x, 30, 'SKIP!', '#ffdd77');
+          this.run.skips = (this.run.skips || 0) + 1;
+          this._pumpMedal('skips', this.run.skips);
         }
       }
 
@@ -446,6 +599,27 @@
       this.run.altitude = p.y;
       if (p.y > this.run.maxAltitude) this.run.maxAltitude = p.y;
       if (p.y > 1800 && !this.run.reachedSpace) { this.run.reachedSpace = true; this._addFloat(p.x, p.y, 'SPACE!', '#ffffff'); }
+      if (speed > this.run.peakSpeed) this.run.peakSpeed = speed;
+      // pacifist tracker — distance flown without a hazard hit so far
+      const noHazNow = p.x - this.run._noHazardsBaseX;
+      if (noHazNow > this.run.noHazardsDist) this.run.noHazardsDist = noHazNow;
+      // post-vault wandering distance
+      if (this.run.bossPunched) {
+        const pbd = p.x - this.run._postBossBaseX;
+        if (pbd > this.run.postBossDist) this.run.postBossDist = pbd;
+      }
+      // Periodic medal pumps for continuous metrics — every 0.4s is plenty
+      // and keeps the popup queue sane.
+      this._medalPumpT -= realDt;
+      if (this._medalPumpT <= 0) {
+        this._medalPumpT = 0.4;
+        this._pumpMedal('distance', this.run.distance);
+        this._pumpMedal('altitude', this.run.maxAltitude);
+        this._pumpMedal('speed',    this.run.peakSpeed);
+        this._pumpMedal('time',     this.run.time);
+        if (this.run.bossPunched) this._pumpMedal('endlessDistance', this.run.postBossDist);
+        this._pumpMedal('noHazardsDist', this.run.noHazardsDist);
+      }
 
       // Camera follow (with lead)
       const camLag = 0.12;
@@ -490,12 +664,14 @@
       const d = Math.hypot(dx, dy);
       if (d < 60) {
         this.run.bossPunched = true;
+        this.run._postBossBaseX = p.x;
         this._addFloat(p.x, p.y + 40, 'PUNCH!', '#ffcc33');
         this._explode(v.x, v.y, 60, '#ffcc33');
         this.run.coins += 500;
         this.sfx.play('unlock');
         this.shake(20, 0.8);
         this.flash('#ffcc33', 0.4);
+        this._pumpMedal('vaultPunch', 1);
       }
     }
 
@@ -537,11 +713,27 @@
     _spawnHazard(id, x, y) {
       const def = LTH.HAZARD_DEFS[id];
       if (!def) return;
+      // Per-hazard launch initial state. Lightning falls straight down,
+      // comets arc across the sky, mines hover with tiny drift, everything
+      // else gets a gentle random drift.
+      let vx = (Math.random() - 0.5) * 40;
+      let vy = (Math.random() - 0.5) * 30;
+      let yy = y;
+      if (def.drops) {
+        yy = y + 280;            // start above the spawn altitude
+        vx = (Math.random() - 0.5) * 20;
+        vy = -380;               // dropping fast (world y up = positive)
+      } else if (def.arcs) {
+        vx = -260 - Math.random() * 80;  // sweeping leftward across the sky
+        vy = -40 + Math.random() * 80;
+      } else if (id === 'mine') {
+        vx = (Math.random() - 0.5) * 15;
+        vy = (Math.random() - 0.5) * 10;
+      }
       this.hazards.push({
-        id, x, y,
+        id, x, y: yy,
         r: def.r, def,
-        vx: (Math.random() - 0.5) * 40,
-        vy: (Math.random() - 0.5) * 30,
+        vx, vy,
         t: 0, fireT: 0.6 + Math.random()
       });
     }
@@ -549,7 +741,7 @@
     // ---------- updates for entities ----------
     _updatePickups(dt) {
       const p = this.player;
-      const mag = this.stats.magnet || 0;
+      const mag = (this.stats.magnet || 0) + (this.run.magnetT > 0 ? (this.run.magnetBonus || 600) : 0);
       for (let i = this.pickups.length - 1; i >= 0; i--) {
         const pk = this.pickups[i];
         pk.t += dt;
@@ -604,10 +796,41 @@
         this.sfx.play('ding', { freq: 1400 });
         this._addFloat(pk.x, pk.y, '+15 RING', '#ffdd77');
         this._coinBurst(pk.x, pk.y, 8);
+      } else if (pk.id === 'mega_coin') {
+        const v = Math.round((def.value || 25) * this.run.mult);
+        this.run.coins += v;
+        this.sfx.play('coin', { freq: 1500, dur: 0.18, vol: 0.14 });
+        this._addFloat(pk.x, pk.y, '+' + v + '  MEGA', '#ffe680');
+        this._coinBurst(pk.x, pk.y, 16);
+        this.flash('#ffe680', 0.08);
+      } else if (pk.id === 'shield') {
+        this.run.shielded = true;
+        this.sfx.play('unlock', { freq: 800, dur: 0.18, vol: 0.12 });
+        this._addFloat(pk.x, pk.y, 'SHIELD', '#7ce0ff');
+      } else if (pk.id === 'magnet_potion') {
+        this.run.magnetT = def.dur || 8;
+        this.run.magnetBonus = def.magnet || 600;
+        this.sfx.play('ding', { freq: 600 });
+        this._addFloat(pk.x, pk.y, 'MAGNET ' + (def.dur || 8) + 's', '#ff66cc');
+      } else if (pk.id === 'boost_can') {
+        p.fuel = Math.min((this.stats.fuel || 1) + 0.4, p.fuel + (def.fuel || 0.6));
+        // brief auto-burn pulse straight along the nose, scaled with thrust
+        const thrust = (this.stats.thrust || 900);
+        const pulse = thrust * (def.pulse || 0.5);
+        p.vx +=  Math.cos(p.angle) * pulse * 0.06;
+        p.vy += -Math.sin(p.angle) * pulse * 0.06;
+        this.sfx.play('boost', { freq: 320, dur: 0.22, vol: 0.12 });
+        this.shake(4, 0.16);
+        this._addFloat(pk.x, pk.y, '+FUEL  PULSE', '#ff8833');
+      } else if (pk.id === 'slow_time') {
+        this.run.slowT = Math.max(this.run.slowT, def.dur || 4);
+        this.sfx.play('ding', { freq: 400, dur: 0.3 });
+        this._addFloat(pk.x, pk.y, 'SLOW-MO ' + (def.dur || 4) + 's', '#cc99ff');
       }
       pk.taken = true;
       this.pickups.splice(i, 1);
       this.run.pickups++;
+      this._pumpMedal('coins', this.run.coins);
     }
 
     _updateHazards(dt) {
@@ -660,11 +883,30 @@
     _applyHazardHit(h) {
       const p = this.player;
       const def = h.def;
+      // Shield bubble: absorbs the next hit completely. No slowdown, no
+      // angular kick, no break in the pacifist tracker.
+      if (this.run.shielded) {
+        this.run.shielded = false;
+        this.sfx.play('ding', { freq: 1100, dur: 0.18, vol: 0.14 });
+        this.shake(3, 0.12);
+        this.flash('#7ce0ff', 0.12);
+        p._hitIframe = 1.1;
+        this._addFloat(h.x, h.y, 'BLOCKED', '#7ce0ff');
+        this._explode(h.x, h.y, 18, '#7ce0ff');
+        return;
+      }
       // Hazards never kill — they brake your speed and shove you off course.
       // The only way the run ends is hitting the ground.
       p.vx *= def.speedHit;
       p.vy *= def.speedHit;
       if (def.drag) p.vx -= p.vx * def.drag * 60;
+      if (def.knockback) {
+        // shove the player AWAY from the hazard along the contact normal
+        const dx = p.x - h.x, dy = p.y - h.y;
+        const d = Math.hypot(dx, dy) || 1;
+        p.vx += (dx / d) * def.knockback;
+        p.vy += (dy / d) * def.knockback;
+      }
       // small angular kick so a hit feels disruptive without flipping you
       p.angle += (Math.random() - 0.5) * 0.6;
       this.sfx.play('hit');
@@ -672,6 +914,9 @@
       this.flash('#ff4444', 0.1);
       p._hitIframe = 1.1;
       this.run.hazardsHit++;
+      // pacifist medal tracks "max distance flown without a hit"; reset
+      // baseline so the next hit-free stretch can compete with this one.
+      this.run._noHazardsBaseX = p.x;
       this._addFloat(h.x, h.y, 'OOF!', '#ff7777');
       this._explode(h.x, h.y, 12, def.color);
     }
@@ -749,6 +994,14 @@
         this.prevPhase = 'report'; this.phase = 'shop';
         k['s'] = false; k['S'] = false;
       }
+      if (k['m'] || k['M']) {
+        this.prevPhase = 'report'; this.phase = 'medals';
+        k['m'] = false; k['M'] = false;
+      }
+      if (k['t'] || k['T']) {
+        this.prevPhase = 'report'; this.phase = 'stats';
+        k['t'] = false; k['T'] = false;
+      }
     }
 
     _reset() {
@@ -761,14 +1014,10 @@
       this.effects = [];
       this.particles.clear();
       this.spawnCursor = 200;
-      this.run = {
-        distance: 0, altitude: 0, maxAltitude: 0,
-        coins: 0, mult: 1.0, multT: 0,
-        time: 0, stunts: 0,
-        fuelUsed: 0, pickups: 0, hazardsHit: 0,
-        reachedSpace: false,
-        flipCount: 0, bossPunched: false
-      };
+      this.run = this._newRun();
+      this.medalPopups = [];
+      this.medalsEarnedThisRun = [];
+      this._medalPumpT = 0;
       this.cam.x = 0; this.cam.y = 0;
       this.modifier = this._pickModifier();
       this._applyStats();
@@ -824,6 +1073,8 @@
         case 'flight':   return this._drawFlight(ctx);
         case 'report':   return this._drawReport(ctx);
         case 'shop':     return this._drawShop(ctx);
+        case 'medals':   return this._drawMedals(ctx);
+        case 'stats':    return this._drawStats(ctx);
       }
     }
 
@@ -838,31 +1089,114 @@
       const gx = W * 0.5 + 10, gy = (H - 30) - rampBase + 4;
       this._drawVehicle(ctx, gx, gy, 0, false);
 
-      // Intro card
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(W * 0.18, 60, W * 0.64, 170);
+      // ---------- DAY CARD ----------
+      // The campaign track gets a "Day N" header + story snippet + primary
+      // and bonus objectives. Endless mode swaps in an Endless banner
+      // instead — no objectives, just a "fly forever" cue.
+      const cardX = W * 0.16, cardY = 50, cardW = W * 0.68, cardH = 200;
+      ctx.fillStyle = 'rgba(8,12,22,0.78)';
+      ctx.fillRect(cardX, cardY, cardW, cardH);
       ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 2;
-      ctx.strokeRect(W * 0.18 + 0.5, 60.5, W * 0.64, 170);
-      Draw.text(ctx, 'LEARN TO HEIST', W / 2, 100, { size: 30, color: '#ffcc33', weight: '800', align: 'center' });
-      Draw.text(ctx, 'Click to begin aim \u2022 then click to lock power. Good luck, goblin.',
-        W / 2, 130, { size: 13, color: '#fff', align: 'center' });
-      // status line
-      Draw.text(ctx, 'Coins: \u25CF ' + this.save.coins + '     Launches: ' + this.save.totalLaunches +
-        '     Best Dist: ' + this.save.bestDistance + 'm     Best Alt: ' + this.save.bestAltitude + 'm',
-        W / 2, 158, { size: 12, color: '#aee', align: 'center' });
-      Draw.text(ctx, 'Today\'s Weather: ' + this.modifier.name + ' \u2014 ' + this.modifier.desc,
-        W / 2, 182, { size: 12, color: '#ffcc33', align: 'center' });
-      Draw.text(ctx, '[S] Workshop   [R] Reroll Weather   [Click/Space] Launch',
-        W / 2, 208, { size: 11, color: '#b8cdd8', align: 'center' });
+      ctx.strokeRect(cardX + 0.5, cardY + 0.5, cardW, cardH);
 
-      // Goal progress strip
-      const done = this.save.goalsDone.length;
-      Draw.text(ctx, 'Goals ' + done + ' / ' + LTH.GOALS.length, 30, 40, { size: 14, color: '#ffcc33', weight: '700' });
-      for (let i = 0; i < LTH.GOALS.length; i++) {
-        const filled = this.save.goalsDone.indexOf(LTH.GOALS[i].id) !== -1;
-        ctx.fillStyle = filled ? '#ffcc33' : 'rgba(255,255,255,0.2)';
-        ctx.fillRect(30 + i * 18, 46, 14, 14);
+      const day = (this.save.mode !== 'endless') ? LTH.currentDay(this.save) : null;
+      if (day) {
+        const dayNum = (this.save.dayIdx | 0) + 1;
+        Draw.text(ctx, 'DAY ' + dayNum + ' OF ' + LTH.CAMPAIGN.length, cardX + 24, cardY + 28,
+          { size: 12, color: '#9bd', weight: '700' });
+        Draw.text(ctx, day.name.toUpperCase(), cardX + 24, cardY + 56,
+          { size: 24, color: '#ffcc33', weight: '800' });
+        // Wrap story across two lines if it's long
+        this._wrapText(ctx, day.story, cardX + 24, cardY + 84, cardW - 48, 16,
+          { size: 12, color: '#cfd6e0', italic: true });
+        // Primary
+        const pTxt = this._objectiveText(day.kind, day.target);
+        Draw.text(ctx, '\u25C6 PRIMARY: ' + pTxt + '   (+' + day.reward + ')',
+          cardX + 24, cardY + 138, { size: 13, color: '#ffe680', weight: '700' });
+        // Bonus
+        if (day.bonus) {
+          Draw.text(ctx, '\u2606 BONUS: ' + day.bonus.desc + '   (+' + day.bonus.reward + ')',
+            cardX + 24, cardY + 158, { size: 12, color: '#9be0ff' });
+        }
+        Draw.text(ctx, '[Click/Space] Launch   [S] Workshop   [M] Medals   [T] Stats   [R] Reroll Weather' +
+          (this.save.endlessUnlocked ? '   [Tab] Mode' : ''),
+          cardX + 24, cardY + cardH - 14, { size: 11, color: '#8aa' });
+      } else {
+        // Campaign cleared — encourage Endless or replay (mode toggle).
+        Draw.text(ctx, this.save.mode === 'endless' ? 'ENDLESS RUN' : 'CAMPAIGN COMPLETE',
+          cardX + 24, cardY + 56, { size: 24, color: '#ffcc33', weight: '800' });
+        Draw.text(ctx, this.save.mode === 'endless'
+            ? 'No objective. Fly as far as you can. Beat your best.'
+            : 'You punched the vault. Press [Tab] to switch to Endless mode.',
+          cardX + 24, cardY + 88, { size: 13, color: '#cfd6e0', italic: true });
+        Draw.text(ctx, 'Best: ' + this.save.bestDistance + 'm  /  ' + this.save.bestAltitude + 'm  /  ' + this.save.bestCoins + ' coins',
+          cardX + 24, cardY + 116, { size: 12, color: '#9be0ff' });
+        Draw.text(ctx, '[Click/Space] Launch   [S] Workshop   [M] Medals   [T] Stats   [R] Reroll Weather' +
+          (this.save.endlessUnlocked ? '   [Tab] Mode' : ''),
+          cardX + 24, cardY + cardH - 14, { size: 11, color: '#8aa' });
       }
+
+      // Weather pill bottom-left of card
+      Draw.text(ctx, 'WEATHER:  ' + this.modifier.name + ' \u2014 ' + this.modifier.desc,
+        cardX + 24, cardY + 184, { size: 12, color: '#ffcc33' });
+
+      // ---------- SIDEBAR: stats + goals + medals counters ----------
+      // Top-left mini-stats so the player feels the meta-progression.
+      Draw.text(ctx, 'COIN \u25CF ' + this.save.coins, 30, 30, { size: 14, color: '#ffcc33', weight: '700' });
+      Draw.text(ctx, 'LAUNCH ' + this.save.totalLaunches, 30, 50, { size: 11, color: '#9bd' });
+      Draw.text(ctx, 'BEST D ' + this.save.bestDistance + 'm', 30, 66, { size: 11, color: '#9bd' });
+      Draw.text(ctx, 'BEST A ' + this.save.bestAltitude + 'm', 30, 82, { size: 11, color: '#9bd' });
+
+      // Medal counter top-right
+      const medN = (typeof LTH.medalsEarnedCount === 'function') ? LTH.medalsEarnedCount(this.save) : 0;
+      const medMax = (LTH.MEDALS && LTH.MEDALS.length) || 0;
+      Draw.text(ctx, 'MEDALS ' + medN + ' / ' + medMax, W - 30, 30,
+        { size: 14, color: '#ffcc33', weight: '700', align: 'right' });
+      Draw.text(ctx, 'GOALS ' + this.save.goalsDone.length + ' / ' + LTH.GOALS.length, W - 30, 50,
+        { size: 11, color: '#9bd', align: 'right' });
+      if (this.save.endlessUnlocked) {
+        Draw.text(ctx, 'MODE: ' + (this.save.mode === 'endless' ? 'ENDLESS' : 'CAMPAIGN'), W - 30, 66,
+          { size: 11, color: '#ff7ad8', align: 'right', weight: '700' });
+      }
+    }
+
+    // Helper — wrap a string across N lines at fixed line height.
+    _wrapText(ctx, text, x, y, maxWidth, lineHeight, opts) {
+      const fontSize = (opts && opts.size) || 12;
+      const italic = !!(opts && opts.italic);
+      ctx.font = (italic ? 'italic ' : '') + fontSize + 'px ui-sans-serif, system-ui, sans-serif';
+      const words = (text || '').split(' ');
+      let line = '';
+      const lines = [];
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (ctx.measureText(test).width > maxWidth && line) {
+          lines.push(line);
+          line = w;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+      // cap at 3 lines so the day card stays a fixed height
+      const n = Math.min(3, lines.length);
+      for (let i = 0; i < n; i++) {
+        Draw.text(ctx, lines[i], x, y + i * lineHeight, opts);
+      }
+    }
+
+    _objectiveText(kind, target) {
+      switch (kind) {
+        case 'distance':   return 'Fly ' + target + ' m';
+        case 'altitude':   return 'Reach ' + target + ' m altitude';
+        case 'coins':      return 'Collect ' + target + ' coins';
+        case 'stunts':     return 'Land ' + target + ' stunts';
+        case 'skips':      return 'Skip the ground ' + target + ' times';
+        case 'time':       return 'Stay airborne ' + target + ' s';
+        case 'speed':      return 'Hit ' + target + ' m/s';
+        case 'vaultPunch': return 'Punch the vault';
+      }
+      return kind + ' ' + target;
     }
 
     _drawLaunchUi(ctx) {
@@ -985,6 +1319,19 @@
 
       this._drawVehicle(ctx, psx, psy, p.angle, true);
 
+      // Shield bubble aura — render *over* the vehicle so the player sees
+      // the protective layer and remembers they have one charge.
+      if (this.run.shielded) {
+        const pulse = 0.55 + Math.sin(this.run.time * 6) * 0.2;
+        ctx.strokeStyle = 'rgba(124,224,255,' + pulse.toFixed(2) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(psx, psy, 30, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = '#7ce0ff';
+        ctx.beginPath(); ctx.arc(psx, psy, 30, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
       // STALL warning ring — pulses red when AoA crosses the stall edge.
       if (vSpeed > 60) {
         const vAng = Math.atan2(-p.vy, p.vx);
@@ -1018,6 +1365,37 @@
       }
       ctx.globalAlpha = 1;
 
+      // Slow-time vignette — purple radial overlay for the duration.
+      if (this.run.slowT > 0) {
+        const a = Math.min(0.55, this.run.slowT / 4 * 0.55);
+        const grad = ctx.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, Math.max(W, H) * 0.7);
+        grad.addColorStop(0, 'rgba(160,80,255,0)');
+        grad.addColorStop(1, 'rgba(80,30,140,' + a.toFixed(3) + ')');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // Medal-earned popups bottom-center
+      if (this.medalPopups && this.medalPopups.length) {
+        let popY = H - 70;
+        for (const pop of this.medalPopups) {
+          const a = 1 - (pop.age / pop.life);
+          const slide = Math.min(1, pop.age / 0.18) * 30;
+          const px = W / 2;
+          ctx.globalAlpha = Math.max(0, a);
+          ctx.fillStyle = 'rgba(8,12,22,0.85)';
+          ctx.fillRect(px - 180, popY - 26 + (30 - slide), 360, 38);
+          ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 2;
+          ctx.strokeRect(px - 180 + 0.5, popY - 26 + (30 - slide) + 0.5, 360, 38);
+          Draw.text(ctx, '\u2605 MEDAL: ' + pop.medal.name + '   +' + pop.medal.reward,
+            px, popY - 6 + (30 - slide), { size: 14, color: '#ffcc33', weight: '800', align: 'center' });
+          Draw.text(ctx, pop.medal.desc, px, popY + 8 + (30 - slide),
+            { size: 11, color: '#9be0ff', align: 'center' });
+          popY -= 46;
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // HUD
       this._drawFlightHud(ctx);
     }
@@ -1032,7 +1410,11 @@
 
       ctx.save();
       ctx.translate(sx, sy);
-      ctx.rotate(-angle); // our world angles flipped
+      // player.angle is already in canvas convention (negative = up), the
+      // same convention the velocity arrow uses. Rotate directly — the
+      // earlier rotate(-angle) mirrored the body across the horizontal,
+      // putting the flame on the wrong side relative to the nose.
+      ctx.rotate(angle);
 
       // Glider wings
       if (glider > 0 && gOpen) {
@@ -1181,6 +1563,74 @@
         ctx.beginPath(); ctx.arc(sx, sy + bob, 42, 0, TAU); ctx.stroke();
         ctx.strokeStyle = '#fff4a8'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(sx, sy + bob, 42, 0, TAU); ctx.stroke();
+      } else if (pk.id === 'mega_coin') {
+        // chunky pulsing coin with sparkle aura
+        const bob = Math.sin(pk.t * 4) * 3;
+        const pulse = 1 + Math.sin(pk.t * 6) * 0.08;
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = '#ffe680';
+        ctx.beginPath(); ctx.arc(sx, sy + bob, 28 * pulse, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#7a5a15';
+        ctx.beginPath(); ctx.arc(sx, sy + bob, 18, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#ffe680';
+        ctx.beginPath(); ctx.arc(sx, sy + bob, 16, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#fff4a8';
+        ctx.fillRect(sx - 12, sy - 13 + bob, 24, 3);
+        Draw.text(ctx, '$', sx, sy + 4 + bob, { size: 16, color: '#7a5a15', weight: '900', align: 'center' });
+      } else if (pk.id === 'shield') {
+        // bubble — glassy cyan ring around a small core
+        const pulse = 1 + Math.sin(pk.t * 4) * 0.1;
+        ctx.strokeStyle = '#7ce0ff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(sx, sy, 18 * pulse, 0, TAU); ctx.stroke();
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#7ce0ff';
+        ctx.beginPath(); ctx.arc(sx, sy, 18 * pulse, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(sx - 5, sy - 5, 3, 0, TAU); ctx.fill();
+      } else if (pk.id === 'magnet_potion') {
+        // horseshoe magnet shape inside a pink flask
+        ctx.fillStyle = '#3a1a2a';
+        ctx.fillRect(sx - 10, sy - 14, 20, 24);
+        ctx.fillStyle = '#ff66cc';
+        ctx.fillRect(sx - 9, sy - 13, 18, 22);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(sx - 5, sy - 9, 10, 4);
+        ctx.fillStyle = '#220';
+        ctx.fillRect(sx - 4, sy + 2, 3, 6);
+        ctx.fillRect(sx + 1, sy + 2, 3, 6);
+      } else if (pk.id === 'boost_can') {
+        // jerry-can with flame icon
+        ctx.fillStyle = '#552210';
+        ctx.fillRect(sx - 9, sy - 12, 18, 22);
+        ctx.fillStyle = '#ff8833';
+        ctx.fillRect(sx - 8, sy - 11, 16, 20);
+        ctx.fillStyle = '#ffdd55';
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 4);
+        ctx.lineTo(sx - 4, sy + 4);
+        ctx.lineTo(sx, sy + 1);
+        ctx.lineTo(sx + 4, sy + 4);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(sx - 3, sy - 13, 6, 2);
+      } else if (pk.id === 'slow_time') {
+        // hourglass-ish purple potion
+        const tw = Math.sin(pk.t * 6) * 2;
+        ctx.fillStyle = '#2a1a3a';
+        ctx.fillRect(sx - 10, sy - 14, 20, 24);
+        ctx.fillStyle = '#a674e6';
+        ctx.fillRect(sx - 9, sy - 13, 18, 22);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(sx - 5, sy - 7);
+        ctx.lineTo(sx + 5, sy - 7);
+        ctx.lineTo(sx + 1 + tw * 0.3, sy);
+        ctx.lineTo(sx + 5, sy + 7);
+        ctx.lineTo(sx - 5, sy + 7);
+        ctx.lineTo(sx - 1 + tw * 0.3, sy);
+        ctx.closePath(); ctx.fill();
       }
     }
 
@@ -1262,6 +1712,72 @@
         ctx.fillRect(sx - 18, sy - 2, 32, 4);
         ctx.fillStyle = '#ffeeaa';
         ctx.beginPath(); ctx.arc(sx - 2, sy, 3, 0, TAU); ctx.fill();
+      } else if (h.id === 'lightning') {
+        // jagged falling bolt — reads as motion thanks to a faint trail above
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#fffbb0'; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 60);
+        ctx.lineTo(sx + 4, sy - 30);
+        ctx.lineTo(sx - 3, sy);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fffbb0';
+        ctx.beginPath();
+        ctx.moveTo(sx - 6, sy - 14);
+        ctx.lineTo(sx + 4, sy - 6);
+        ctx.lineTo(sx - 2, sy - 4);
+        ctx.lineTo(sx + 8, sy + 8);
+        ctx.lineTo(sx - 4, sy + 6);
+        ctx.lineTo(sx + 2, sy + 18);
+        ctx.lineTo(sx - 8, sy + 4);
+        ctx.lineTo(sx - 2, sy);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(sx - 3, sy - 6);
+        ctx.lineTo(sx + 1, sy - 2);
+        ctx.lineTo(sx - 3, sy + 6);
+        ctx.lineTo(sx + 1, sy + 2);
+        ctx.closePath(); ctx.fill();
+      } else if (h.id === 'mine') {
+        // spiked sea-mine vibe with a single red blink eye
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath(); ctx.arc(sx, sy, 16, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#3a3a3a';
+        ctx.beginPath(); ctx.arc(sx - 4, sy - 4, 5, 0, TAU); ctx.fill();
+        for (let s = 0; s < 8; s++) {
+          const a = s * Math.PI / 4 + h.t * 0.4;
+          const ax = sx + Math.cos(a) * 16;
+          const ay = sy + Math.sin(a) * 16;
+          const tx = sx + Math.cos(a) * 24;
+          const ty = sy + Math.sin(a) * 24;
+          ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(tx, ty); ctx.stroke();
+          ctx.fillStyle = '#aa4422';
+          ctx.beginPath(); ctx.arc(tx, ty, 3, 0, TAU); ctx.fill();
+        }
+        const blink = (Math.sin(h.t * 4) > 0.6) ? 1 : 0.3;
+        ctx.fillStyle = 'rgba(255,80,80,' + blink + ')';
+        ctx.beginPath(); ctx.arc(sx, sy, 4, 0, TAU); ctx.fill();
+      } else if (h.id === 'comet') {
+        // bright nucleus + gradient tail trailing behind the velocity vec
+        const trailA = Math.atan2(-h.vy, h.vx) + Math.PI;  // canvas frame
+        const tx = sx + Math.cos(trailA) * 70;
+        const ty = sy + Math.sin(trailA) * 70;
+        const grad = ctx.createLinearGradient(sx, sy, tx, ty);
+        grad.addColorStop(0, 'rgba(255,200,120,0.95)');
+        grad.addColorStop(1, 'rgba(255,90,40,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(sx + Math.cos(trailA + 1.5) * 18, sy + Math.sin(trailA + 1.5) * 18);
+        ctx.lineTo(sx + Math.cos(trailA - 1.5) * 18, sy + Math.sin(trailA - 1.5) * 18);
+        ctx.lineTo(tx, ty);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffaa55';
+        ctx.beginPath(); ctx.arc(sx, sy, 18, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(sx - 3, sy - 3, 8, 0, TAU); ctx.fill();
       }
     }
 
@@ -1305,6 +1821,42 @@
 
       // Modifier tag
       Draw.text(ctx, this.modifier.name, 14, H - 10, { size: 11, color: '#ffcc33' });
+
+      // Day-objective chip — live progress so the player knows whether
+      // they're already past the day's primary objective.
+      if (this.save.mode !== 'endless') {
+        const day = LTH.currentDay(this.save);
+        if (day) {
+          const cur = LTH.runMetric(this.run, day.kind);
+          const done = cur >= day.target;
+          const txt = 'DAY ' + ((this.save.dayIdx | 0) + 1) + ' \u2014 ' +
+            this._objectiveText(day.kind, day.target) + '  (' + cur + '/' + day.target + ')';
+          ctx.fillStyle = done ? 'rgba(40,90,40,0.55)' : 'rgba(0,0,0,0.55)';
+          const cw = Math.min(W - 360, 24 + ctx.measureText(txt).width);
+          ctx.fillRect(W / 2 - cw / 2, H - 30, cw, 22);
+          ctx.strokeStyle = done ? '#6ecf6e' : '#ffcc33'; ctx.lineWidth = 1;
+          ctx.strokeRect(W / 2 - cw / 2 + 0.5, H - 30 + 0.5, cw, 22);
+          Draw.text(ctx, txt, W / 2, H - 14,
+            { size: 12, color: done ? '#9de39d' : '#ffcc33', weight: '700', align: 'center' });
+        }
+      }
+
+      // Status pills — show under the alt-o-meter so they stay out of the
+      // flight area.
+      const pillX = W - 110, pillY0 = 70;
+      let py = pillY0;
+      const drawPill = (label, color) => {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(pillX - 60, py, 80, 18);
+        ctx.strokeStyle = color; ctx.lineWidth = 1;
+        ctx.strokeRect(pillX - 60 + 0.5, py + 0.5, 80, 18);
+        Draw.text(ctx, label, pillX - 20, py + 13, { size: 10, color, align: 'center', weight: '700' });
+        py += 22;
+      };
+      if (this.run.shielded)    drawPill('SHIELD', '#7ce0ff');
+      if (this.run.slowT > 0)   drawPill('SLOW-MO ' + this.run.slowT.toFixed(1), '#cc99ff');
+      if (this.run.magnetT > 0) drawPill('MAGNET ' + this.run.magnetT.toFixed(1), '#ff66cc');
+
       // Controls hint
       Draw.text(ctx, 'A/D or \u2190/\u2192 pitch \u00b7 SPACE boost \u00b7 G glider \u00b7 dive for speed, pull up to soar',
         W - 20, H - 10, { size: 10, color: '#aaa', align: 'right' });
@@ -1351,19 +1903,60 @@
       Draw.text(ctx, 'COINS EARNED', bx + 40, y, { size: 16, color: '#ffcc33', weight: '800' });
       Draw.text(ctx, '\u25CF ' + (this.run.earned | 0), bx + bw - 40, y, { size: 18, color: '#ffcc33', weight: '800', align: 'right' });
 
-      // Goals newly cleared
-      if (this.run.completedGoals && this.run.completedGoals.length) {
+      // Day grade card — primary objective hit / missed and bonus
+      const grade = this.run.dayGrade;
+      if (grade && grade.day) {
         y += 28;
-        Draw.text(ctx, 'Goals cleared:', bx + 40, y, { size: 13, color: '#6ecf6e', weight: '700' });
+        const dayNum = (this.save.dayIdx | 0); // already advanced if primaryDone
+        const labelDay = grade.primaryDone ? ('DAY ' + dayNum + ' COMPLETE') : ('DAY ' + (dayNum + 1) + ' \u2014 RETRY');
+        Draw.text(ctx, labelDay + ': ' + grade.day.name,
+          bx + 40, y, { size: 14, color: grade.primaryDone ? '#6ecf6e' : '#ffaa55', weight: '800' });
         y += 18;
-        for (const g of this.run.completedGoals) {
-          Draw.text(ctx, '\u2605 ' + g.desc + '  (+' + g.reward + ')', bx + 60, y, { size: 12, color: '#6ecf6e' });
+        const okClr = grade.primaryDone ? '#9de39d' : '#ffaa55';
+        Draw.text(ctx, (grade.primaryDone ? '\u2714 ' : '\u2718 ') +
+          this._objectiveText(grade.day.kind, grade.day.target) +
+          '   (' + grade.primaryVal + '/' + grade.day.target + ')',
+          bx + 60, y, { size: 12, color: okClr });
+        y += 16;
+        if (grade.day.bonus) {
+          const bClr = grade.bonusDone ? '#9be0ff' : '#88a';
+          Draw.text(ctx, (grade.bonusDone ? '\u2605 ' : '\u2606 ') + grade.day.bonus.desc,
+            bx + 60, y, { size: 11, color: bClr });
+          y += 14;
+        }
+        if (grade.dayReward) {
+          Draw.text(ctx, '+' + grade.dayReward + ' coins (day reward)',
+            bx + 60, y, { size: 12, color: '#ffcc33', weight: '700' });
           y += 16;
         }
       }
 
+      // Medals newly earned this run
+      if (this.run.newMedals && this.run.newMedals.length) {
+        y += 12;
+        Draw.text(ctx, 'Medals earned:', bx + 40, y, { size: 13, color: '#ffcc33', weight: '700' });
+        y += 18;
+        for (const m of this.run.newMedals) {
+          Draw.text(ctx, '\u2605 ' + m.name + '  (+' + m.reward + ')',
+            bx + 60, y, { size: 12, color: '#ffcc33' });
+          y += 14;
+        }
+      }
+
+      // Goals newly cleared (legacy track stays visible if any tripped)
+      if (this.run.completedGoals && this.run.completedGoals.length) {
+        y += 12;
+        Draw.text(ctx, 'Goals cleared:', bx + 40, y, { size: 13, color: '#6ecf6e', weight: '700' });
+        y += 18;
+        for (const g of this.run.completedGoals) {
+          Draw.text(ctx, '\u2605 ' + g.desc + '  (+' + g.reward + ')', bx + 60, y, { size: 12, color: '#6ecf6e' });
+          y += 14;
+        }
+      }
+
       // Bottom prompts
-      Draw.text(ctx, '[Click / Enter / R] Launch Again    [S] Workshop', W / 2, by + bh - 20, { size: 13, color: '#aaa', align: 'center' });
+      Draw.text(ctx, '[Click / Enter / R] Launch Again    [S] Workshop    [M] Medals    [T] Stats',
+        W / 2, by + bh - 20, { size: 12, color: '#aaa', align: 'center' });
     }
 
     _drawShop(ctx) {
@@ -1481,6 +2074,117 @@
         });
       }
     }
+
+    // ---------- MEDALS GRID OVERLAY ----------
+    _drawMedals(ctx) {
+      // Background — dimmed workshop scene
+      this.cam.x = 0; this.cam.y = 0;
+      LTH.World.render(ctx, this.world, this.cam, W, H, 0.016);
+      LTH.World.renderRamp(ctx, this.cam, W, H, this.save.tiers.ramp | 0);
+      ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, W, H);
+
+      const bx = 40, by = 40, bw = W - 80, bh = H - 80;
+      ctx.fillStyle = '#0c0f18'; ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 3;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+
+      const earned = (typeof LTH.medalsEarnedCount === 'function') ? LTH.medalsEarnedCount(this.save) : 0;
+      Draw.text(ctx, 'MEDALS', W / 2, by + 38, { size: 26, color: '#ffcc33', align: 'center', weight: '800' });
+      Draw.text(ctx, earned + ' / ' + LTH.MEDALS.length + ' earned', W / 2, by + 60,
+        { size: 13, color: '#9bd', align: 'center' });
+
+      // 5 columns x 5 rows grid (25 medals fits exactly)
+      const cols = 5, rows = Math.ceil(LTH.MEDALS.length / cols);
+      const cellW = (bw - 60) / cols;
+      const cellH = (bh - 130) / rows;
+      const gx = bx + 30, gy = by + 90;
+
+      LTH.ensureMedalsSchema(this.save);
+      for (let i = 0; i < LTH.MEDALS.length; i++) {
+        const m = LTH.MEDALS[i];
+        const rec = this.save.medals[m.id];
+        const cx = gx + (i % cols) * cellW;
+        const cy = gy + Math.floor(i / cols) * cellH;
+        const cw = cellW - 8, ch = cellH - 8;
+        ctx.fillStyle = rec.earned ? '#1a2a18' : '#151920';
+        ctx.fillRect(cx, cy, cw, ch);
+        ctx.strokeStyle = rec.earned ? '#ffcc33' : '#333'; ctx.lineWidth = 1;
+        ctx.strokeRect(cx + 0.5, cy + 0.5, cw, ch);
+        // medal disc
+        const dx = cx + 22, dy = cy + 24;
+        ctx.fillStyle = rec.earned ? '#ffcc33' : '#444';
+        ctx.beginPath(); ctx.arc(dx, dy, 12, 0, TAU); ctx.fill();
+        ctx.fillStyle = rec.earned ? '#7a5a15' : '#222';
+        ctx.beginPath(); ctx.arc(dx, dy, 7, 0, TAU); ctx.fill();
+        Draw.text(ctx, '\u2605', dx, dy + 5, { size: 14, color: rec.earned ? '#ffe680' : '#666', weight: '900', align: 'center' });
+        // name
+        Draw.text(ctx, m.name, cx + 42, cy + 18,
+          { size: 12, color: rec.earned ? '#ffcc33' : '#aab', weight: '800' });
+        // desc (one short line)
+        Draw.text(ctx, m.desc, cx + 42, cy + 32, { size: 9, color: '#8aa' });
+        // progress bar
+        const pct = Math.max(0, Math.min(1, rec.progress / m.target));
+        ctx.fillStyle = '#222'; ctx.fillRect(cx + 8, cy + ch - 18, cw - 16, 8);
+        ctx.fillStyle = rec.earned ? '#ffcc33' : '#5a8acf';
+        ctx.fillRect(cx + 8, cy + ch - 18, (cw - 16) * pct, 8);
+        // reward + value
+        const valText = (m.kind === 'fuelLeftPct') ? (Math.round(rec.progress * 100) + '%') : String(rec.progress | 0);
+        Draw.text(ctx, valText + ' / ' + (m.kind === 'fuelLeftPct' ? '50%' : m.target),
+          cx + 8, cy + ch - 22, { size: 9, color: '#8aa' });
+        Draw.text(ctx, '+' + m.reward, cx + cw - 8, cy + ch - 22,
+          { size: 10, color: rec.earned ? '#ffe680' : '#776', weight: '700', align: 'right' });
+      }
+
+      Draw.text(ctx, '[M / Q / Esc / Click] Close', W / 2, by + bh - 16,
+        { size: 11, color: '#888', align: 'center' });
+    }
+
+    // ---------- STATS OVERLAY ----------
+    _drawStats(ctx) {
+      this.cam.x = 0; this.cam.y = 0;
+      LTH.World.render(ctx, this.world, this.cam, W, H, 0.016);
+      LTH.World.renderRamp(ctx, this.cam, W, H, this.save.tiers.ramp | 0);
+      ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, W, H);
+
+      const bx = 100, by = 60, bw = W - 200, bh = H - 120;
+      ctx.fillStyle = '#0c0f18'; ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 3;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+
+      Draw.text(ctx, 'LIFETIME STATS', W / 2, by + 42, { size: 26, color: '#ffcc33', align: 'center', weight: '800' });
+
+      const lt = this.save.lifetime || { distance: 0, altitude: 0, time: 0, coins: 0, launches: 0, vaultPunches: 0 };
+      const rows = [
+        ['Total launches',         this.save.totalLaunches | 0],
+        ['Total distance flown',   (lt.distance | 0) + ' m'],
+        ['Best altitude',          (Math.max(lt.altitude, this.save.bestAltitude) | 0) + ' m'],
+        ['Best single-run dist',   (this.save.bestDistance | 0) + ' m'],
+        ['Best coins (single run)',(this.save.bestCoins | 0)],
+        ['Total coins collected',  (lt.coins | 0)],
+        ['Total airtime',          this._fmtTime(lt.time | 0)],
+        ['Vault punches',          (lt.vaultPunches | 0)],
+        ['Days completed',         (this.save.dayIdx | 0) + ' / ' + LTH.CAMPAIGN.length],
+        ['Medals earned',          (LTH.medalsEarnedCount(this.save) | 0) + ' / ' + LTH.MEDALS.length],
+        ['Endless mode',           this.save.endlessUnlocked ? 'UNLOCKED' : 'locked']
+      ];
+      let y = by + 90;
+      for (const [lab, val] of rows) {
+        Draw.text(ctx, lab, bx + 60, y, { size: 14, color: '#bcd' });
+        Draw.text(ctx, String(val), bx + bw - 60, y, { size: 14, color: '#fff', weight: '700', align: 'right' });
+        y += 28;
+      }
+
+      Draw.text(ctx, '[T / Q / Esc / Click] Close', W / 2, by + bh - 16,
+        { size: 11, color: '#888', align: 'center' });
+    }
+
+    _fmtTime(s) {
+      const m = Math.floor(s / 60);
+      const r = s - m * 60;
+      if (m > 0) return m + 'm ' + r + 's';
+      return r + 's';
+    }
+
   }
 
   NDP.attachGame('learntoheist', LearnToHeistGame);
