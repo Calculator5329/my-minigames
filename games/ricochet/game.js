@@ -1,10 +1,16 @@
 /* Ricochet — one bullet, ricochets off walls/obstacles.
-   Now: enemy variety, boss every 5 levels, pre-run perk shop, persistent unlocks. */
+   Now: enemy variety, boss every 5 levels, pre-run perk shop, persistent unlocks.
+
+   Currency model: per-game wallet ('Ricochets') under Storage.*GameWallet
+   ('ricochet'). Pre-run shop spends Ricochets only. Wallet awarded at
+   end-of-run from level milestones. NG+/persistent (campaign victory does
+   not wipe). */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
+  const GID = 'ricochet';
 
   const UPGRADES = [
     { id: 'bounce',   label: '+Bounces',      desc: '+4 max bounces per tier', cost: 80,  max: 3, color: '#4fc8ff' },
@@ -25,6 +31,8 @@
 
       this.level = 1;
       this.levelsCleared = 0;
+      this.levelsClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.misses = 0;
       this.maxLevel = 25;
       this.setHud(this._hud());
@@ -47,6 +55,11 @@
         upgrades: this.save.upgrades
       });
       this.save.bestLevel = Math.max(this.save.bestLevel, this.levelsCleared);
+    }
+
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
     }
 
     nextLevel() {
@@ -253,10 +266,13 @@
         if (this.levelPause > 1.0) {
           if (this.levelResult === 'won') {
             this.levelsCleared++;
+            this.levelsClearedThisRun++;
             this.level++;
             this._writeSave();
             if (this.level > this.maxLevel) {
               this.phase = 'victory';
+              this.victoryAchieved = true;
+              this._awardWallet();
               setTimeout(() => this.win(), 1200);
               return;
             }
@@ -304,17 +320,14 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('ricochet', {
-                    bestLevel: this.save.bestLevel,
-                    upgrades: this.save.upgrades
-                  });
-                  this.sfx.play('buy');
-                  // re-apply maxBounces if level already built
-                  this.maxBounces = 14 + this.level + this.save.upgrades.bounce * 4;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('ricochet', {
+                  bestLevel: this.save.bestLevel,
+                  upgrades: this.save.upgrades
+                });
+                this.sfx.play('buy');
+                this.maxBounces = 14 + this.level + this.save.upgrades.bounce * 4;
               }
               return;
             }
@@ -428,9 +441,9 @@
       ctx.fillStyle = '#a58abd';
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('25 levels, boss every 5. best: ' + this.save.bestLevel, W / 2, 96);
-      ctx.fillStyle = '#ffcc33';
+      ctx.fillStyle = '#4fc8ff';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Ricochets: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -439,7 +452,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -474,8 +487,10 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) {
-      return Math.max(0, Math.floor(this.levelsCleared / 2) - Math.floor(this.misses / 4));
+    coinsEarned() {
+      const cleared = this.levelsClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return cleared * 1 + winBonus;
     }
   }
 

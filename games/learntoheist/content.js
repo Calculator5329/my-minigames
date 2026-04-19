@@ -196,7 +196,16 @@
   };
 
   // ------------- SAVE SCHEMA -------------
-  // Stored under NDP.Engine.Storage with a custom key, namespace 'lth_v1'.
+  // Per-game wallet pattern (see docs/plans/2026-04-19-currency-migration.md):
+  //   - `coins` lives in `Storage.*GameWallet('learntoheist')` (the per-game
+  //     wallet) so the Workshop shop never touches the global theme coins.
+  //   - everything else (tiers, goalsDone, bests, totalLaunches, ...) lives
+  //     in `Storage.setGameData('learntoheist', {...})`.
+  //   - `LTH.OLD_LS_KEY` ('ndp.lth_v1') is the pre-migration localStorage
+  //     blob; `_migrateLegacy` lifts it forward exactly once per device.
+  LTH.GAME_ID = 'learntoheist';
+  LTH.OLD_LS_KEY = 'ndp.lth_v1';
+
   LTH.defaultSave = function () {
     const tiers = {};
     Object.keys(LTH.UPGRADES).forEach(k => { tiers[k] = 0; });
@@ -214,26 +223,63 @@
     };
   };
 
-  LTH.loadSave = function () {
+  LTH._migrateLegacy = function () {
     try {
-      const raw = localStorage.getItem('ndp.lth_v1');
-      if (!raw) return LTH.defaultSave();
-      const s = JSON.parse(raw);
-      const def = LTH.defaultSave();
-      // merge in case schema grew
-      Object.keys(def.tiers).forEach(k => {
-        if (typeof s.tiers[k] !== 'number') s.tiers[k] = 0;
-      });
-      return Object.assign(def, s);
-    } catch (e) { return LTH.defaultSave(); }
+      const Storage = NDP.Engine && NDP.Engine.Storage;
+      if (!Storage) return;
+      const cur = Storage.getGameData(LTH.GAME_ID);
+      if (cur && Object.keys(cur).length) return;          // already migrated
+      const raw = localStorage.getItem(LTH.OLD_LS_KEY);
+      if (!raw) return;
+      const old = JSON.parse(raw);
+      if (!old || typeof old !== 'object') return;
+      const wallet = (old.coins | 0);
+      const data = Object.assign({}, old);
+      delete data.coins;
+      Storage.setGameData(LTH.GAME_ID, data);
+      if (wallet > 0) Storage.setGameWallet(LTH.GAME_ID, wallet);
+      localStorage.removeItem(LTH.OLD_LS_KEY);
+    } catch (e) {}
+  };
+
+  LTH.loadSave = function () {
+    LTH._migrateLegacy();
+    const def = LTH.defaultSave();
+    let stored = {};
+    try {
+      const Storage = NDP.Engine && NDP.Engine.Storage;
+      if (Storage) stored = Storage.getGameData(LTH.GAME_ID) || {};
+    } catch (e) { stored = {}; }
+    const merged = Object.assign(def, stored);
+    // schema-grow safety: any new tier key defaults to 0
+    Object.keys(def.tiers).forEach(k => {
+      if (typeof merged.tiers[k] !== 'number') merged.tiers[k] = 0;
+    });
+    // coins always read from the wallet of record
+    try {
+      const Storage = NDP.Engine && NDP.Engine.Storage;
+      merged.coins = Storage ? (Storage.getGameWallet(LTH.GAME_ID) | 0) : 0;
+    } catch (e) { merged.coins = 0; }
+    return merged;
   };
 
   LTH.writeSave = function (s) {
-    try { localStorage.setItem('ndp.lth_v1', JSON.stringify(s)); } catch (e) {}
+    try {
+      const Storage = NDP.Engine && NDP.Engine.Storage;
+      if (!Storage) return;
+      const data = Object.assign({}, s);
+      delete data.coins;            // wallet is the source of truth
+      Storage.setGameData(LTH.GAME_ID, data);
+      Storage.setGameWallet(LTH.GAME_ID, s.coins | 0);
+    } catch (e) {}
   };
 
   LTH.resetSave = function () {
-    try { localStorage.removeItem('ndp.lth_v1'); } catch (e) {}
+    try {
+      const Storage = NDP.Engine && NDP.Engine.Storage;
+      if (Storage) Storage.clearGameData(LTH.GAME_ID);
+      localStorage.removeItem(LTH.OLD_LS_KEY);
+    } catch (e) {}
   };
 
   // Compute current equipped stats from save
@@ -260,9 +306,13 @@
   LTH.buyNextTier = function (key, save) {
     const cost = LTH.nextTierCost(key, save);
     if (cost == null) return false;
-    if (save.coins < cost) return false;
-    save.coins -= cost;
+    const Storage = NDP.Engine && NDP.Engine.Storage;
+    if (!Storage) return false;
+    // Spend from the per-game wallet (the source of truth) and mirror the
+    // post-spend balance back into the in-memory save for HUD code.
+    if (!Storage.spendGameWallet(LTH.GAME_ID, cost)) return false;
     save.tiers[key] = (save.tiers[key] | 0) + 1;
+    save.coins = Storage.getGameWallet(LTH.GAME_ID) | 0;
     return true;
   };
 })();

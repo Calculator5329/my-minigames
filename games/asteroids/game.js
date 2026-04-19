@@ -71,6 +71,11 @@
 
       this.phase = 'intro';
       this.waveN = 1;
+      // Milestone counters drive the global theme-shop coins from coinsEarned().
+      // Per-wave payouts now flow into the per-game asteroids wallet (used by
+      // the Upgrade Bay), not the global pool.
+      this.wavesClearedThisRun = 0;
+      this.victoryAchieved = false;
 
       this.upgrades = { rapidfire:false, twin:false, shield:false, missile:false };
       this.shieldHp = 0;
@@ -145,7 +150,12 @@
       saveData(this.save);
     }
 
-    coinsEarned() { return 0; }   // coins are paid out per-wave via Storage.addCoins
+    // Global theme-shop coins: 1 per wave actually cleared this run + 20
+    // victory bonus. The fat per-wave payouts go to the asteroids wallet
+    // instead so they fund the in-game Upgrade Bay, not the theme shop.
+    coinsEarned() {
+      return (this.wavesClearedThisRun | 0) * 1 + (this.victoryAchieved ? 20 : 0);
+    }
 
     // ----------------------------------------------------------------------
     _refreshHud() {
@@ -162,7 +172,7 @@
         `<span>Wave <b>${this.waveN}/${TOTAL_WAVES}</b></span>` +
         mid +
         `<span>Score <b>${this.score}</b></span>` +
-        `<span>● <b>${Storage.getCoins()}</b></span>`
+        `<span>Bay ● <b>${Storage.getGameWallet('asteroids')}</b></span>`
       );
     }
 
@@ -757,12 +767,16 @@
 
     _defeatBoss() {
       const reward = this.boss.kind === 'swarm' ? 30 : 60;
-      Storage.addCoins(reward);
+      Storage.addGameWallet('asteroids', reward);
       this.lastReward = reward;
       this.addScore(this.boss.kind === 'swarm' ? 500 : 1000);
       if (this.boss.kind === 'hive') this.save.defeatedHive = true;
       this.save.bestWave = Math.max(this.save.bestWave, this.waveN);
       saveData(this.save);
+      // A boss kill closes its wave (5 or 10) — count it for the milestone
+      // payout. The hive queen also flips victory before BaseGame.win() runs.
+      this.wavesClearedThisRun++;
+      if (this.boss.kind === 'hive') this.victoryAchieved = true;
 
       this.flash('#ffd86b', 0.4);
       this.shake(24, 0.6);
@@ -803,11 +817,12 @@
 
       if (this.rocks.length === 0) {
         const reward = 5 + 2 * this.waveN;
-        Storage.addCoins(reward);
+        Storage.addGameWallet('asteroids', reward);
         this.lastReward = reward;
         this.addScore(50 + 50 * this.waveN);
         this.save.bestWave = Math.max(this.save.bestWave, this.waveN);
         saveData(this.save);
+        this.wavesClearedThisRun++;
         this.phase = 'between';
         this.betweenTimer = 1.4;
         this.flash('#4ade80', 0.2);
@@ -867,7 +882,7 @@
           const u = r.upgrade;
           if (this.upgrades[u.id]) return;
           const cost = this._costFor(u);
-          if (!Storage.spendCoins(cost)) return;
+          if (!Storage.spendGameWallet('asteroids', cost)) return;
           this.upgrades[u.id] = true;
           this.save.perksUnlocked[u.id] = true;
           saveData(this.save);
@@ -1220,7 +1235,7 @@
       ctx.fillText(`Wave ${this.waveN}/${TOTAL_WAVES} cleared · prepping for Wave ${next}`,
                    CX, 110);
       ctx.fillStyle = '#ffd86b'; ctx.font = '16px ui-monospace, monospace';
-      ctx.fillText('● ' + Storage.getCoins() + ' coins', CX, 138);
+      ctx.fillText('Bay credits: ● ' + Storage.getGameWallet('asteroids'), CX, 138);
 
       this.shopRects = [];
       const cardW = 180, cardH = 220, gap = 18;
@@ -1231,7 +1246,7 @@
         const x = startX + i * (cardW + gap);
         const owned = this.upgrades[u.id];
         const cost = this._costFor(u);
-        const broke = !owned && Storage.getCoins() < cost;
+        const broke = !owned && Storage.getGameWallet('asteroids') < cost;
         const halfPrice = !owned && this.save.perksUnlocked[u.id];
 
         this.shopRects.push({ x, y, w: cardW, h: cardH, kind:'upgrade', upgrade: u });

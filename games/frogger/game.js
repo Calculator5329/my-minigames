@@ -86,6 +86,10 @@
       this.dayIx = 0;
       this.lives = 0;
       this.dayPadsFilled = 0;
+      // Milestone counters for global theme-shop coins (see coinsEarned()).
+      // Pickup-driven score still funds the per-game frog wallet via onEnd().
+      this.daysCompletedThisRun = 0;
+      this.victoryAchieved = false;
       this.shopRects = [];
       this.feedback = null;
 
@@ -151,12 +155,19 @@
       };
     }
 
-    onEnd() {
+    onEnd(score) {
       this.save.bestDay = Math.max(this.save.bestDay, this.dayIx + 1);
       saveData(this.save);
+      // Old earn rate (score / 50) now feeds the per-game frog wallet.
+      // Pickup-driven score lives there; theme-shop coins come from milestones.
+      const purse = Math.max(0, Math.floor((score | 0) / 50));
+      if (purse > 0) Storage.addGameWallet('frogger', purse);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 50)); }
+    // Global theme-shop coins: 4 per day completed this run + 20 victory bonus.
+    coinsEarned(/*score*/) {
+      return (this.daysCompletedThisRun | 0) * 4 + (this.victoryAchieved ? 20 : 0);
+    }
 
     cellX(col) { return col * CELL + CELL / 2; }
     cellY(row) { return row * ROW_H + ROW_H / 2; }
@@ -475,6 +486,7 @@
 
       // Day clear?
       if (this.dayPadsFilled >= day.target) {
+        this.daysCompletedThisRun++;
         if (this.dayIx === DAYS.length - 1) {
           // Day 5 → boss
           this._enterBoss();
@@ -711,8 +723,8 @@
         if (r.kind === 'perk') {
           const p = r.perk;
           if (this.save.perks[p.id]) return;
-          if (Storage.getCoins() < p.cost) return;
-          if (!Storage.spendCoins(p.cost)) return;
+          if (Storage.getGameWallet('frogger') < p.cost) return;
+          if (!Storage.spendGameWallet('frogger', p.cost)) return;
           this.save.perks[p.id] = true;
           saveData(this.save);
           this.sfx.play('buy');
@@ -833,6 +845,10 @@
         this.save.defeatedHawk = true;
         this.save.bestDay = DAYS.length;
         saveData(this.save);
+        // The hawk falling closes Day 5 — count it as a completed day for
+        // milestone payouts, then mark the run as victorious.
+        this.daysCompletedThisRun++;
+        this.victoryAchieved = true;
         this.phase = 'bossClear';
       }
     }
@@ -1200,9 +1216,9 @@
       ctx.fillText('MARSH SHOP', cx, 70);
       ctx.shadowBlur = 0;
 
-      const coins = Storage.getCoins();
+      const coins = Storage.getGameWallet('frogger');
       ctx.fillStyle = '#ffd86b'; ctx.font = '16px ui-monospace, monospace';
-      ctx.fillText('● ' + coins + ' coins', cx, 105);
+      ctx.fillText('Marsh purse: ● ' + coins, cx, 105);
 
       this.shopRects = [];
       const cardW = 200, cardH = 240, gap = 20;

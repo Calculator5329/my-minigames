@@ -68,18 +68,23 @@
     const c = tierAccentColor(tower, p);
     ctx.save();
 
-    // Tier 1: small accent dot near the top of the chassis.
+    // Tier 1: small accent dot + soft glow near the top of the chassis.
     if (tier >= 1) {
       const off = p === 'A' ? -22 : 22; // top-left vs top-right
+      const gx = cx + off * 0.7, gy = cy - 18;
+      ctx.shadowColor = c.glow || c.core;
+      ctx.shadowBlur = 6;
       ctx.fillStyle = c.core;
       ctx.strokeStyle = c.edge;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(cx + off * 0.7, cy - 18, 3, 0, Math.PI * 2);
+      ctx.arc(gx, gy, 3.2, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
-    // Tier 2: thin ring around chassis in path color.
+    // Tier 2: thin ring around chassis + a small "patch" plate carrying
+    // the path's signature glyph so the build is identifiable at a glance.
     if (tier >= 2) {
       ctx.strokeStyle = c.core;
       ctx.lineWidth = 1.5;
@@ -87,21 +92,47 @@
       ctx.beginPath();
       ctx.arc(cx, cy, 22, 0, Math.PI * 2);
       ctx.stroke();
+      // Tier badge plate — left side for path A, right for B
+      const px = cx + (p === 'A' ? -16 : 16);
+      const py = cy + 18;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#0a0e1a';
+      ctx.beginPath();
+      ctx.arc(px, py, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = c.core;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      // Tier 'pip' count inside the plate (1 dot at T2, 2 at T3, 3 at T4)
+      const pipsCount = Math.min(3, tier - 1);
+      ctx.fillStyle = c.core;
+      const pipR = 1.3;
+      const pipGap = 3.2;
+      const pipsW = pipsCount * pipR * 2 + (pipsCount - 1) * (pipGap - pipR * 2);
+      const pipStart = px - pipsW / 2 + pipR;
+      for (let i = 0; i < pipsCount; i++) {
+        ctx.beginPath();
+        ctx.arc(pipStart + i * pipGap, py, pipR, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    // Tier 3: 3 chevron spikes.
+    // Tier 3: chevron spikes + thicker outer ring + orbiting plate.
     if (tier >= 3) {
       ctx.fillStyle = c.core;
       ctx.strokeStyle = c.edge;
       ctx.lineWidth = 1;
       ctx.globalAlpha = 1;
       if (p === 'A') {
-        // Spikes along firing axis (lance feel)
+        // Spikes along firing axis (lance feel) with a glow.
+        ctx.shadowColor = c.glow || c.core;
+        ctx.shadowBlur = 4;
         for (let i = 0; i < 3; i++) {
           const r = 18 + i * 4;
           spike(ctx, cx, cy, angle, r, 6 - i * 1.5);
           ctx.fill(); ctx.stroke();
         }
+        ctx.shadowBlur = 0;
       } else {
         // Cardinal star
         for (let i = 0; i < 4; i++) {
@@ -109,13 +140,31 @@
           ctx.fill(); ctx.stroke();
         }
       }
-      // thicker outer ring
+      // Thicker outer ring with energy pulse
       ctx.strokeStyle = c.edge;
       ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.7;
+      ctx.globalAlpha = 0.5 + Math.sin(time * 3 + (p === 'A' ? 0 : Math.PI)) * 0.2;
       ctx.beginPath();
       ctx.arc(cx, cy, 24, 0, Math.PI * 2);
       ctx.stroke();
+      // Orbiting plate — small disc circling the chassis
+      const orbAng = time * (p === 'A' ? 1.4 : -1.1) + (p === 'A' ? 0 : Math.PI);
+      const ox = cx + Math.cos(orbAng) * 28;
+      const oy = cy + Math.sin(orbAng) * 28;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = c.core;
+      ctx.strokeStyle = '#0a0e1a';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(ox, oy, 3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Trailing dot
+      const ox2 = cx + Math.cos(orbAng - 0.4) * 28;
+      const oy2 = cy + Math.sin(orbAng - 0.4) * 28;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.arc(ox2, oy2, 1.6, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Tier 4: handled by drawTier4Aura
@@ -125,56 +174,112 @@
   function drawTier4Aura(ctx, cx, cy, p, time, tower) {
     const c = tierAccentColor(tower, p);
     ctx.save();
-    // Slow rotating outer aura
-    const spin = time * (p === 'A' ? 0.6 : -0.4);
-    const r = 28 + Math.sin(time * 2) * 1.5;
-    // Glow disc
-    ctx.globalAlpha = 0.18;
+    const spin = time * (p === 'A' ? 0.7 : -0.5);
+    const breathe = Math.sin(time * 2) * 1.5;
+    const r = 28 + breathe;
+
+    // Soft pulsing glow disc — much beefier than before
+    ctx.shadowColor = c.glow || c.core;
+    ctx.shadowBlur = 18;
+    ctx.globalAlpha = 0.22 + Math.sin(time * 3) * 0.06;
     ctx.fillStyle = c.core;
-    ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2); ctx.fill();
-    // 8-spoke aura ring
-    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 8, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Rotating spoke ring (blade segments)
+    ctx.globalAlpha = 0.9;
     ctx.strokeStyle = c.core;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     for (let i = 0; i < 8; i++) {
       const a1 = spin + i * Math.PI / 4;
       const a2 = a1 + Math.PI / 8;
       ctx.moveTo(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r);
-      ctx.lineTo(cx + Math.cos(a2) * (r + 4), cy + Math.sin(a2) * (r + 4));
+      ctx.lineTo(cx + Math.cos(a2) * (r + 5), cy + Math.sin(a2) * (r + 5));
     }
     ctx.stroke();
+
+    // Counter-rotating outer ring (dashed)
+    ctx.lineWidth = 1.2;
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 9, -spin * 0.6, -spin * 0.6 + Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Three orbiting energy beads — drift around the aura ring
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = c.glow || c.core;
+    ctx.shadowBlur = 10;
+    for (let i = 0; i < 3; i++) {
+      const a = spin * 1.4 + i * (Math.PI * 2 / 3);
+      const bx = cx + Math.cos(a) * (r + 2);
+      const by = cy + Math.sin(a) * (r + 2);
+      ctx.beginPath();
+      ctx.arc(bx, by, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
     // Crown glyph
     if (p === 'A') {
       // Lance pointing in firing-axis direction (or straight up if symmetric)
       const ang = (typeof tower.angle === 'number' && !tower._symmetric) ? tower.angle : -Math.PI / 2;
       ctx.fillStyle = c.core;
       ctx.strokeStyle = c.edge;
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.4;
+      ctx.shadowColor = c.glow || c.core;
+      ctx.shadowBlur = 6;
       ctx.beginPath();
-      const tip = { x: cx + Math.cos(ang) * 30, y: cy + Math.sin(ang) * 30 };
-      const left = { x: cx + Math.cos(ang + Math.PI / 2) * 4, y: cy + Math.sin(ang + Math.PI / 2) * 4 };
-      const right = { x: cx + Math.cos(ang - Math.PI / 2) * 4, y: cy + Math.sin(ang - Math.PI / 2) * 4 };
+      const tip = { x: cx + Math.cos(ang) * 34, y: cy + Math.sin(ang) * 34 };
+      const left = { x: cx + Math.cos(ang + Math.PI / 2) * 5, y: cy + Math.sin(ang + Math.PI / 2) * 5 };
+      const right = { x: cx + Math.cos(ang - Math.PI / 2) * 5, y: cy + Math.sin(ang - Math.PI / 2) * 5 };
       ctx.moveTo(tip.x, tip.y); ctx.lineTo(left.x, left.y); ctx.lineTo(right.x, right.y); ctx.closePath();
       ctx.fill(); ctx.stroke();
+      // Energy line down the lance
+      ctx.strokeStyle = '#fff';
+      ctx.globalAlpha = 0.7 + Math.sin(time * 8) * 0.3;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * 6, cy + Math.sin(ang) * 6);
+      ctx.lineTo(cx + Math.cos(ang) * 28, cy + Math.sin(ang) * 28);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
     } else {
-      // Diamond gem on top
+      // Faceted floating gem on top with energy halo
+      ctx.shadowColor = c.glow || c.core;
+      ctx.shadowBlur = 8;
       ctx.fillStyle = c.core;
       ctx.strokeStyle = c.edge;
-      ctx.lineWidth = 1.2;
-      const cx2 = cx, cy2 = cy - 26;
+      ctx.lineWidth = 1.4;
+      const cx2 = cx, cy2 = cy - 30 + Math.sin(time * 2) * 1.5;
       ctx.beginPath();
-      ctx.moveTo(cx2, cy2 - 5);
-      ctx.lineTo(cx2 + 4, cy2);
-      ctx.lineTo(cx2, cy2 + 5);
-      ctx.lineTo(cx2 - 4, cy2);
+      ctx.moveTo(cx2, cy2 - 6);
+      ctx.lineTo(cx2 + 5, cy2);
+      ctx.lineTo(cx2, cy2 + 6);
+      ctx.lineTo(cx2 - 5, cy2);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
-      // sparkle
+      // Crown points
+      ctx.beginPath();
+      ctx.moveTo(cx2 - 5, cy2);
+      ctx.lineTo(cx2 - 8, cy2 - 4);
+      ctx.lineTo(cx2 - 5, cy2 - 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx2 + 5, cy2);
+      ctx.lineTo(cx2 + 8, cy2 - 4);
+      ctx.lineTo(cx2 + 5, cy2 - 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // Sparkle cross
       ctx.strokeStyle = '#fff';
-      ctx.globalAlpha = 0.7 + Math.sin(time * 4) * 0.3;
-      ctx.beginPath(); ctx.moveTo(cx2 - 7, cy2); ctx.lineTo(cx2 + 7, cy2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx2, cy2 - 7); ctx.lineTo(cx2, cy2 + 7); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.7 + Math.sin(time * 5) * 0.3;
+      ctx.beginPath(); ctx.moveTo(cx2 - 9, cy2); ctx.lineTo(cx2 + 9, cy2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx2, cy2 - 9); ctx.lineTo(cx2, cy2 + 9); ctx.stroke();
     }
     ctx.restore();
   }

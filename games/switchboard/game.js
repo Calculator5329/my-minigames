@@ -33,6 +33,9 @@
 
     loadNight(n) {
       SB.Voices.stopAll();
+      // Escalation 0..1 used by the voice chain (more reverb / hiss / lower
+      // bandpass ceiling as nights progress).
+      SB.Voices.setEscalation(Math.min(1, (n - 1) / 4));
       this.phase = 'intro';
       this.introT = 0;
       if (n === 5) {
@@ -101,18 +104,17 @@
     _tickBoard(dt) {
       const st = this.nightState;
       const hooks = {
-        ring: (c) => { /* could trigger a soft ring sample */ },
+        ring: (c) => { SB.Voices.ring(); },
         missed: (c) => { this.flash('#d84a48', 0.15); },
         wrong: (c) => { this.flash('#d84a48', 0.25); this.shake(6, 0.2); SB.Voices.stop(this._cid(c)); },
         correct: (c) => { this.flash('#6cff9a', 0.1); SB.Voices.stop(this._cid(c)); },
         denied: (c) => { SB.Voices.stop(this._cid(c)); },
         answered: (c) => {
-          // Start the caller's voice playing as soon as answered
+          SB.Voices.pickupBlip();
           SB.Voices.play(this._cid(c), { voice: c.voice, text: c.text });
         },
         whisper: (c) => {
-          SB.Voices.whisper('whisper_' + c.idx, { voice: c.voice, text: c.text });
-          // Show the whisper as a hint
+          SB.Voices.whisper(this._wcid(c), { voice: c.voice, text: c.text });
           this.focusHint = c.text;
           this.focusHintT = 3.0;
         }
@@ -168,6 +170,9 @@
     }
 
     _cid(c) { return `n${this.currentNight}_c${c.idx}`; }
+    /* Whisper IDs are stable per night-and-call so the generator script can
+       optionally bake matching files (whisper_n3_c3.mp3, etc). */
+    _wcid(c) { return `whisper_n${this.currentNight}_c${c.idx}`; }
 
     _mouseDown(e) {
       if (this.phase !== 'board' || !this.nightState) return;
@@ -185,7 +190,10 @@
         if (Math.hypot(s.x - mx, s.y - my) < 22 && this.nightState.ringing.has(s.line)) {
           SB.Nights.answer(this.nightState, s.line, {
             ring: () => {}, missed: () => {}, wrong: () => {}, correct: () => {}, denied: () => {},
-            answered: (c) => { SB.Voices.play(this._cid(c), { voice: c.voice, text: c.text }); },
+            answered: (c) => {
+              SB.Voices.pickupBlip();
+              SB.Voices.play(this._cid(c), { voice: c.voice, text: c.text });
+            },
             whisper: () => {}
           });
           return;
@@ -211,7 +219,10 @@
         if (socket.side === 'in' && this.nightState.ringing.has(socket.line)) {
           SB.Nights.answer(this.nightState, socket.line, {
             ring: ()=>{}, missed: ()=>{}, wrong: ()=>{}, correct: ()=>{}, denied: ()=>{},
-            answered: (c) => { SB.Voices.play(this._cid(c), { voice: c.voice, text: c.text }); },
+            answered: (c) => {
+              SB.Voices.pickupBlip();
+              SB.Voices.play(this._cid(c), { voice: c.voice, text: c.text });
+            },
             whisper: ()=>{}
           });
         }

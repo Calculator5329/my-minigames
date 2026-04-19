@@ -1,9 +1,15 @@
-/* Stargazer — twin-stick shooter with pre-run shop, bombs, formations, bosses. */
+/* Stargazer — twin-stick shooter with pre-run shop, bombs, formations, bosses.
+
+   Currency model: per-game wallet ('Lensgleam') under Storage.*GameWallet
+   ('stargazer'). Pre-run shop spends Lensgleam only. Wallet is awarded at
+   end-of-run from wave milestones (same formula as theme coinsEarned).
+   NG+/persistent. */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
+  const GID = 'stargazer';
   const PLAYER_SPEED = 280;
   const BULLET_SPEED = 640;
   const FIRE_COOLDOWN = 0.12;
@@ -35,6 +41,8 @@
       this.wave = 1;
       this.waveTimer = 0;
       this.waveEnemiesLeft = 0;
+      this.wavesClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.stars = [];
       for (let i = 0; i < 120; i++) {
         this.stars.push({ x: Math.random()*W, y: Math.random()*H, z: 0.2 + Math.random()*1.5 });
@@ -59,6 +67,11 @@
         bestWave: Math.max(this.save.bestWave, this.wave),
         upgrades: this.save.upgrades
       });
+    }
+
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
     }
 
     startWave() {
@@ -233,7 +246,7 @@
           this.shake(10, 0.35);
           this.flash('#ff4fd8', 0.2);
           this.particles.burst(p.x, p.y, 20, { color: '#ff4fd8', speed: 220, life: 0.6 });
-          if (p.hp <= 0) { this._writeSave(); this.gameOver(); return; }
+          if (p.hp <= 0) { this._writeSave(); this._awardWallet(); this.gameOver(); return; }
         }
       }
       this.enemies = this.enemies.filter(e => e.hp > 0);
@@ -261,7 +274,7 @@
           p.hp--; p.iframes = 1.4;
           this.sfx.play('hurt');
           this.shake(10, 0.35);
-          if (p.hp <= 0) { this._writeSave(); this.gameOver(); return; }
+          if (p.hp <= 0) { this._writeSave(); this._awardWallet(); this.gameOver(); return; }
         }
       }
 
@@ -276,7 +289,7 @@
           this.sfx.play('hurt');
           this.flash('#ff4fd8', 0.2);
           this.bullets.splice(i, 1);
-          if (p.hp <= 0) { this._writeSave(); this.gameOver(); return; }
+          if (p.hp <= 0) { this._writeSave(); this._awardWallet(); this.gameOver(); return; }
         }
       }
 
@@ -295,6 +308,7 @@
       this.pickups = this.pickups.filter(pk => !pk.picked && pk.age < 12);
 
       if (!this.boss && this.waveEnemiesLeft <= 0 && this.enemies.length === 0) {
+        this.wavesClearedThisRun++;
         this.wave++;
         this._writeSave();
         this.startWave();
@@ -344,19 +358,16 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('stargazer', {
-                    bestWave: this.save.bestWave, upgrades: this.save.upgrades
-                  });
-                  this.sfx.play('buy');
-                  // refresh live stats
-                  this.player.maxHp = 3 + this.save.upgrades.hp;
-                  this.player.hp = this.player.maxHp;
-                  this.bombs = this.save.upgrades.bomb;
-                  this.player.overcharge = this.save.upgrades.oc ? 2 : 0;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('stargazer', {
+                  bestWave: this.save.bestWave, upgrades: this.save.upgrades
+                });
+                this.sfx.play('buy');
+                this.player.maxHp = 3 + this.save.upgrades.hp;
+                this.player.hp = this.player.maxHp;
+                this.bombs = this.save.upgrades.bomb;
+                this.player.overcharge = this.save.upgrades.oc ? 2 : 0;
               }
               return;
             }
@@ -488,9 +499,9 @@
       ctx.fillStyle = '#a58abd';
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('survive the void. boss every 10 waves. best: wave ' + this.save.bestWave, W / 2, 96);
-      ctx.fillStyle = '#ffcc33';
+      ctx.fillStyle = '#7ae0ff';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Lensgleam: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -499,7 +510,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -534,7 +545,11 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 200)); }
+    coinsEarned() {
+      const cleared = this.wavesClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return cleared * 2 + winBonus;
+    }
   }
 
   NDP.attachGame('stargazer', StargazerGame);

@@ -4,6 +4,293 @@ A running log of what shipped in each session.
 
 ## 2026-04-19
 
+### Site quality pass — Phase 1: repo hygiene
+Plan: `docs/plans/2026-04-19-selector-loader-pwa.md`. Phase 1 of 4
+(hygiene → loader → selector → PWA).
+
+- Moved 36 stray dev screenshots (~8.6 MB) from the repo root into
+  `docs/screenshots/`. Verified zero references from `index.html`,
+  `main.js`, `styles.css`, or any `manifest.assets` array — these were
+  pure dev artifacts that bloated every clone with no runtime use.
+- Consolidated the per-game gitignore stanzas
+  (`reactor-*.png`, `bloom-*.png`, `diner-*.png`, `frog-*.png`,
+  `frogger-*.png`, `sigil-*.png`) into a single `/*.png` rule that
+  catches future strays at root without affecting tracked PNGs under
+  `games/<id>/` or `assets/`. Added `firebase-debug*.log` ignore.
+- Updated `firebase.json` ignore from `*.png` to `/*.png` (root-only,
+  matches new gitignore semantics). `docs/**` already excludes the
+  new screenshot dir from deploy.
+- Two PNGs that *were* tracked (`lth-boost-test.png`, `lth-flight.png`)
+  show as renames into `docs/screenshots/` in the next commit. Net
+  history change is one rename + one ignore rule.
+
+### Orbital — two-column shop, BTD4-style tower unlocks, two new towers, beefier upgrade overlays
+User feedback: "Lets continue improving orbital, maybe the towers menu should
+have two columns so it doesnt go off screen, and there should be more towers
+that are disabled until I unlock them just like in the original BTD4 and I
+don't know what to buy to see the hidden ones and we need more towers and we
+need more detail and cool graphics for all the upgrades."
+
+Six things shipped:
+
+1. **Two-column tower shop** — `games/orbital/ui/side-panel.js`
+   `_drawTowerList` now renders the catalog as a 2-column grid of compact
+   tiles (`tileW`/`tileH`/`gap` with scroll clamp + a right-edge scroll
+   indicator). Each tile gets a left-edge color band keyed to the tower's
+   path A accent for fast visual scan. Replaced `_drawTowerRow` with
+   `_drawTowerTile`, updated hit-testing accordingly. Tooltip box bumped
+   220×86 to fit the new locked-tower copy.
+
+2. **Round-gated unlock system** — `games/orbital/data/towers.js`
+   Every tower got an `unlock: { round: N }` property. Schedule is set
+   so the player meets a new toy roughly every 2–4 rounds:
+   Dart/Cannon R1, Gravity R2, Beam R4, Tesla R5, Cryo R6, Flare R7,
+   Sniper R8, Support R10, **Mortar R11**, Missile R12, Quant R14,
+   Engineer R16, **Crystal R17**, Chrono R19, Singularity R22.
+   Public API now exports `unlockRound(k)` and `isUnlocked(k, bestRound)`.
+
+3. **Persistent best-round + locked-tower UX** — `games/orbital/lib/persist.js`
+   + `games/orbital/game.js`. Added `recordRoundClear(round)` /
+   `getBestRound()` and wired them into `init()` and `onRoundClear()`.
+   In `side-panel.js`, locked towers render with a dimmed sprite, a lock
+   glyph, and `R<unlockRound>` text; tooltip says "Locked: clear round X
+   to unlock." Both the buy-click and the hotkey selection paths in
+   `game.js` short-circuit on `isTowerUnlocked(key) === false` and
+   surface a flash message so the player knows why nothing happened.
+
+4. **Unlock toast** — `games/orbital/game.js`. After `onRoundClear` we diff
+   the new bestRound against `prevBest` and, if any towers crossed their
+   unlock threshold, set `this.unlockToast = { names, t: 4 }`. The toast
+   is decremented in `update(dt)` and rendered as a banner at the top of
+   the play area in `render(ctx)`, plus a `flashMessage` for redundancy.
+
+5. **Two new towers — Mortar (R11) and Crystal (R17)**
+   - `games/orbital/data/towers.js`: full base stats + 2 upgrade paths each.
+     Both reuse the existing gun-tower update path (no new mechanics
+     required, keeps the surface area small).
+   - `games/orbital/sprites.js`: added `S.turret_mortar` and
+     `S.turret_crystal` SVGs.
+   - `games/orbital/manifest.js`: registered `orb_turret_mortar` and
+     `orb_turret_crystal` so the loader picks them up.
+   - `games/orbital/game.js`: `_updateTower()` switch now branches both
+     keys to `_updateGunTower`.
+
+6. **Beefier upgrade overlays** — `games/orbital/lib/overlay.js`
+   `drawPathOverlay` now reads as a clear progression instead of "small
+   dot → bigger dot":
+   - **T1**: glowing accent dot (with `shadowBlur`) at the top of the
+     chassis, off-set left for path A, right for path B.
+   - **T2**: thin ring around the chassis + a small badge plate on the
+     side carrying tier-pip count (1 pip at T2, 2 at T3, 3 at T4) so a
+     glance tells you the build at a distance.
+   - **T3**: path A draws three nested chevron spikes along the firing
+     axis with glow; path B draws a 4-point cardinal star. Both add a
+     thicker pulsing outer ring and an orbiting plate (with a faint
+     trailing dot) circling the chassis.
+   - **T4**: handed off to `drawTier4Aura`, which now layers a pulsing
+     glow disc, an 8-spoke rotating blade ring, a counter-rotating
+     dashed outer ring, three orbiting energy beads, and the crowning
+     glyph (path A: lance with energy line down the shaft; path B:
+     faceted floating gem with crown points and sparkle cross).
+   This keeps the per-tower SVG count flat (still ~one sprite per
+   tower) while making the four upgrade tiers visually distinct.
+
+### Reactor — meltdown transparency pass
+User feedback: "Reactor is great but I keep dying on day 2 and I don't have
+any good info as to why." Day 2 silently introduces investor visits and the
+"Risky Loan" card auto-picks after 6s, dumping +30 heat with no explanation.
+The recap previously just said `MELTDOWN · Day N` with stats — never WHY.
+
+Fixed by surfacing the information at every layer:
+
+- `games/reactor/game.js`: added a per-day heat event log (ring buffer of
+  `{t, source, label, amount, after%}`), `peakHeatPct`, and `deathCause`
+  state. Every heat-changing path now logs (vent path here, others in
+  `events.js`). Sustained-high-throttle is logged as a single rolling entry
+  so the post-mortem can show "High throttle 6.2s → 121%". `_diagnoseMeltdown()`
+  scans the last 6s of the log, picks the dominant heat source, and
+  produces an actionable one-liner with a tip per source. Reset on
+  `_beginNextDay`.
+- `games/reactor/game.js` — `_drawGauges`: heat dial now shows a labelled
+  red `MAX` tick at 100% AND a red `MELTDOWN` tick at the actual hard cap
+  for the current day, plus `cap N` printed under the digit so the player
+  always knows where the fail line sits.
+- `games/reactor/game.js` — `_drawCriticalBanner`: full-width pulsing red
+  banner whenever `heat > maxHeat` showing live `% / cap %` plus the
+  actionable text "PRESS SPACE TO VENT · drop throttle below 30%" (or
+  the vent cooldown countdown if it's not ready).
+- `games/reactor/game.js` — `_drawDayIntro` + `_dayIntroFor(day)`: 6-second
+  fading banner at the start of every day listing the headline mechanic
+  introduced that day (e.g. "DAY 2 — Investor visits begin. RISKY LOAN
+  gives cash but adds heat.") so day-to-day surprises are at least
+  named once.
+- `games/reactor/events.js`: `impactMeteor`, `triggerSurge`, and the
+  `risky_loan` investor card now call `game._logHeat(...)` with the
+  source/label/amount. Risky Loan is also flagged `danger: true` so the
+  investor overlay paints it with a thick red border + "DANGER · ADDS
+  HEAT" ribbon. Both auto-pick paths (in `events.js#updateInvestor` and
+  `game.js#_updateInvestor`) now skip danger cards and pick the first
+  safe one — idle players are no longer silently killed by the auto-pick.
+- `games/reactor/campaign.js`: `buildRecap` now passes through `cause`,
+  `heatLog` (last 6 entries), and `peakHeatPct`. `drawRecap` adds a
+  red **CAUSE OF DEATH** banner above stats on meltdowns (sized to fit
+  the left column so it doesn't collide with the research panel) and
+  a **LAST HEAT EVENTS** mini-list showing `t=Ns Source +N heat → N%`
+  so the player can see exactly what stacked into the meltdown.
+- `index.html`: bumped reactor script `?v=` from 4 → 6 to bust the
+  browser cache.
+
+Verified end-to-end with a Playwright session: forced a Risky Loan
+meltdown and saw the recap render
+`Risky Loan added +30 heat in 6s (peak 200% / cap 132%). Skip Risky Loan
+when heat is already > 60%.`; forced a sustained-throttle meltdown and
+got `Heat ran away from sustained high throttle (peak 132%). Lower
+throttle sooner, or build a Coolant Loop.` In-play, the CRITICAL banner,
+labelled MAX/MELTDOWN ticks, and DANGER ribbon all render correctly.
+
+
+
+### Barrage — anti-spam pass: per-wave ammo + fire cooldown
+Spam-clicking trivialized barrage: clicks created bursts instantly with no
+ammo and no cooldown, so a player could carpet the screen and clear any wave
+without aiming. Tightened it to classic Missile Command economy.
+
+- `games/barrage/game.js`: added `FIRE_CD = 0.32s` base fire cooldown and a
+  per-wave ammo budget (`_waveAmmo(n) = 10 + n*2 + ammoUpg*6`), refilled on
+  `_startWave()`. Click handler now branches into three cases — empty (red
+  flash + dry-fire blip), throttled (soft tick, no burst), or armed (consume
+  one ammo, set `fireCd`, spawn burst). Crosshair shifts color (yellow / grey
+  while reloading / red when empty), shows a sweeping cooldown ring, and
+  prints `NO AMMO` when out. HUD adds `Ammo n/max` with low-ammo coloring.
+- New shop perks: **Extra Magazines** (+6 ammo/wave, stacks 3, 50c) and
+  **Faster Trigger** (-40% fire cooldown, 1×, 60c). Existing perks unchanged.
+
+### Per-game wallet migration — COMPLETE (all 24 games)
+Capstone entry. Followed up the Vaultbreaker pilot with a full sweep:
+every game with an in-game economy now has its own isolated, persistent
+wallet. The shared `Storage.coins` pool is reserved exclusively for the
+global theme shop in `main.js`. Five parallel migration batches covered
+every game; per-batch detail is in the entries below.
+
+Coverage:
+
+| Status | Games |
+|---|---|
+| Migrated to per-game wallet | bloom, barrage, tanks, diner, sigil, bulwark, depths, learntoheist, orbital, reactor, franchise, crypt, snake, helicopter, frogger, breakout, asteroids, starfall, stargazer, leap, ricochet, gullet, skybound (+ vaultbreaker, the pilot) |
+| Don't-touch (no in-game shop / score-only) | pong, deflect, switchboard, sand |
+
+Cross-cutting wins:
+- Zero `Storage.spendCoins` / `Storage.getCoins` calls remain anywhere
+  under `games/*` for in-game purposes (verified by grep).
+- Every game's `coinsEarned()` is now milestone-based (waves / biomes /
+  floors / chapters / matches / days / cities cleared this run + a
+  victory bonus). No more pickup-inflated score leaking into the global
+  theme pool.
+- Three games (`bulwark`, `depths`, `learntoheist`) migrated off custom
+  `localStorage` keys onto `Storage.setGameData` + `Storage.*GameWallet`,
+  with one-shot legacy readers so existing players keep their progress.
+- Wallet APIs (`getGameWallet`, `addGameWallet`, `spendGameWallet`,
+  `setGameWallet`, `clearGameData`) are smoke-tested for isolation:
+  per-game wallets don't bleed into each other or into global coins.
+- All 28 game files (+ engine) parse cleanly.
+
+Recipe + checklist lives in `docs/plans/2026-04-19-currency-migration.md`
+for any future game.
+
+### Per-game wallet migration — bulwark, depths, learntoheist (legacy-localStorage batch)
+Followed `docs/plans/2026-04-19-currency-migration.md` (esp. step 5) to lift
+the last three games whose persistence still lived in raw `localStorage` keys
+into the shared `NDP.Engine.Storage` per-game wallet pattern. Each game now
+runs the legacy reader exactly once: it only fires when
+`Storage.getGameData(GID)` is empty, copies forward both the meta blob and
+any in-game currency, then `localStorage.removeItem(OLD_KEY)`. `coinsEarned()`
+is milestone-based in all three (no more `floor(score/N)` or `floor(gold/100)`
+formulas leaking the wallet into the global theme pool), and `victoryAchieved`
+is set BEFORE the engine handoff so the win-bonus actually pays out. All three
+default to NG+/persistent — wallets, unlocks, and goal/tier progress are
+untouched on victory.
+
+- `games/learntoheist/content.js`: rewrote `LTH.loadSave` / `LTH.writeSave` /
+  `LTH.resetSave` / `LTH.buyNextTier`. Wallet is now
+  `Storage.*GameWallet('learntoheist')`; everything else (tiers, goalsDone,
+  bests, totalLaunches, stageIdx, bossBeaten) lives in
+  `Storage.setGameData('learntoheist', {...})`. Workshop purchases route
+  through `Storage.spendGameWallet` and mirror the new balance back into
+  `save.coins` for HUD code. New `LTH._migrateLegacy()` lifts the old
+  `'ndp.lth_v1'` blob forward then removes it.
+- `games/learntoheist/game.js`: `init()` adds `victoryAchieved`,
+  `goalsCompletedThisRun`, `_endTriggered`. `_endRun()` increments the goal
+  counter as goals clear and flags `victoryAchieved` on `bossPunched`, but
+  defers the engine handoff to `_updateReport()` so the in-game report
+  screen still shows. On dismiss, the report calls `this.win()` (or
+  `gameOver()`) FIRST so `coinsEarned()` can still read the run's
+  milestones, then `_reset()` wipes per-run state. `coinsEarned()` is
+  `goalsCompletedThisRun * 5 + (victory ? 25 : 0)` (was the BaseGame
+  default `floor(score/25)`, which always returned 0 since LTH never
+  scored).
+- `games/bulwark/game.js`: rewrote `loadMeta` / `saveMeta` and added
+  `migrateLegacy`. `meta.ash` is now mirrored to
+  `Storage.*GameWallet('bulwark')`; `meta.unlocks` and `meta.lastRun` go
+  into `Storage.setGameData('bulwark', {...})`. The legacy `'bulwark_v1'`
+  blob is read once then removed. `init()` adds `victoryAchieved`,
+  `battlesCleared`, `actsCleared`, `_endTriggered` (also reset on New
+  Run / Resume). `finishBattle(false)` now calls `gameOver()` after
+  saving; `returnToMapOrNextAct()` recognizes the act-3 boss clear,
+  bumps `actsCleared`, sets `victoryAchieved = true`, calls `win()`,
+  and clears `lastRun`. `coinsEarned()` is
+  `battlesCleared * 1 + actsCleared * 5 + (victory ? 25 : 0)` (was
+  `floor(score/400)`, where `score` was inflated by in-run gold + ash).
+- `games/depths/game.js`: doesn't extend BaseGame, so plumbed Storage
+  manually via new `_storage()` / `_migrateLegacy()` / `_bankGold()` /
+  `_drawGold()` helpers. `_loadScore` / `_saveScore` now persist the
+  hi-score via `Storage.mergeGameData('depths', { hiscore })`; the
+  legacy `'depths_hiscore'` key is migrated once then removed.
+  `player.gold` now persists between runs through
+  `Storage.*GameWallet('depths')`: `_drawGold()` seeds `_newRun()` from
+  the wallet (NG+), and `_bankGold()` fires on every `_descend()`,
+  every `_die()`, and on victory so a crash mid-run still preserves
+  most of the player's coffers. `_newRun()` resets `victoryAchieved`,
+  `floorsClearedThisRun`, `_endTriggered`, and `state = 'playing'`.
+  `_descend()` increments the floor counter; victory and `_die()` set
+  `this.state = 'won'` / `'over'` (depths never reported these to
+  main.js before, so the engine end overlay literally never showed).
+  `coinsEarned()` is now `floorsClearedThisRun * 4 + (victory ? 25 : 0)`
+  (was `(floor-1)*2 + level + floor(gold/100)` on death, or
+  `60 + level*5 + floor(gold/50)` on victory — both leaked wallet gold
+  into the global pool).
+
+All four files syntax-clean (`new Function(fs.readFileSync(...))` round-trip).
+
+### Feedback inbox (Firestore)
+Players can now send free-text feedback per game from the in-arcade topbar.
+
+- **`engine/firebase-config.js`** — public Web SDK config for the
+  `notdop-minigames` Firebase web app under project `ethan-488900` (apiKey,
+  projectId, etc. are NOT secrets; they identify the project to the browser).
+- **`engine/feedback.js`** — `NDP.Engine.Feedback.submit(gameId, gameTitle, text)`.
+  Lazy-loads the Firebase Web Compat SDK from gstatic on first use (so the
+  initial page load and every game's update loop are unaffected when nobody
+  clicks the button), writes one doc to the `feedback` collection with
+  `{gameId, gameTitle, text, createdAt: serverTimestamp, userAgent, siteUrl}`,
+  enforces a 5s per-tab throttle and 1..2000 char length client-side. Real
+  enforcement is in the rules (see below).
+- **UI** — new `💬 Feedback` button in `index.html`'s arcade topbar opens a
+  themed modal (textarea + char counter + send button + status line). Modal is
+  styled in `styles.css` (`.modal-backdrop`, `.modal-card`, etc.) and wired in
+  `main.js` (`openFeedback`, `sendFeedback`, Esc/click-outside to close,
+  Ctrl/Cmd+Enter to send). The modal pulls the active game's `manifest.id` and
+  `manifest.title` so each submission knows which game it's about.
+- **`firestore.rules`** — committed to the repo for documentation, NOT
+  auto-deployed. Allows `create` only on `feedback/{id}` with strict shape
+  validation (exact field set, type checks, length caps, server-assigned
+  timestamp). Reads/updates/deletes denied — owner reads via Console. The
+  default database is shared with other apps in `ethan-488900`, so these need
+  to be MERGED into the existing published rules manually rather than
+  blanket-deployed.
+- **Web app + DB setup** — created Firebase web app `notdop-minigames` (App ID
+  `1:108003293186:web:3ec0dab1f9f93408164f1b`) via the CLI. Default Firestore
+  DB already existed (native mode, `nam5`).
+
 ### Public hosting + GitHub repo
 The project is now version-controlled and live on the public web.
 
@@ -421,6 +708,100 @@ bug existed on every floor; floor 2 just crossed the pillar-count threshold
     a non-floor tile, scan outward in concentric rings from the spawn cell
     for the nearest clear tile and warp the hero there. Guarantees movement
     is never locked, regardless of future map-gen changes.
+
+### Orbital — Expansion Phases 1 + 2 shipped (BTD4-style depth pass)
+Executed phases 1 + 2 of the expansion plan (`docs/plans/2026-04-19-orbital-expansion.md`).
+Orbital's single 1.7K-line `game.js` was split into a thin orchestrator plus
+14 module files under `data/`, `lib/`, `ui/`, all attached to a new
+`NDP.Orbital` namespace. The play area was narrowed to `W − 240` so a
+persistent BTD4-style right-rail panel can hold the prominent stats strip,
+tower shop, and a full upgrade tree on the selected tower — replacing the
+old transient popup + bottom tray. All 10 existing towers gained dual 4-tier
+upgrade paths with a path-cap rule (only one path past T2), 4 new towers
+shipped (Sniper, Engineer, Cryo, Chrono), 6 new enemy modifiers (camo, lead,
+fortified, swift, armored, regen), 28 active abilities reachable via the
+upgrade tree (`Q`/`E` hotkeys for path A/B), tower XP with three levels,
+targeting priorities (First/Last/Strong/Close), a 50-round campaign across
+five named acts, an end-of-round recap with no-leak streak + combo bonuses,
+and a Stardust meta currency persisted across runs. Quant interest +
+bounty-aura economy from the previous session is now wired through the new
+`lib/economy.js`. Tier upgrades are reflected on the tower sprite at runtime
+via programmatic overlays drawn by `lib/overlay.js` (per-path accents, dots,
+rings, spikes, crowns, auras, plus XP pips), so the canvas mirrors the
+upgrade state without per-tier sprite art. Smoke-tested in the browser:
+modules attach cleanly, Round 1 plays out, side panel shows live stats,
+Dart placement + Tier-1 Path A buy correctly bumps RPS 3.2 → 4.6, deducts
+$200, updates the refund value, and adds the orange path-A marker on the
+tower sprite. Two small bugs fixed during the smoke test: `Rounds.actFor(0)`
+fell through to the last act ("Act V — Final Stand" in the pre-first-wave
+display); clamped the lookup to `max(1, round)` and the panel now shows
+"1/50 · Act I — First Contact" while idle.
+
+- **New file layout (all IIFEs publishing onto `NDP.Orbital`):**
+  - `games/orbital/lib/namespace.js` — bootstraps `NDP.Orbital` with null
+    placeholders so module load order is forgiving.
+  - `games/orbital/lib/upgrades.js` — dual-path purchase rules, path-cap
+    enforcement, `rebuildStats(tower)` from base + bought-tier patches,
+    refund value, `newPlacedTower(key, x, y, t)`.
+  - `games/orbital/lib/xp.js` — `THRESHOLDS = [10, 30, 75]`, `levelOf`,
+    `statMul(level)` for level 1/2/3 passive bonuses, `grant(tower, n)`.
+  - `games/orbital/lib/targeting.js` — First/Last/Strong/Close priority
+    functions + cycle helper for the TGT button and `T` hotkey.
+  - `games/orbital/lib/economy.js` — `roundBonusBreakdown(game)` (base +
+    no-leak streak + combo kicker), `applyInterest(game)` (Quant tower
+    interest on cash reserves at wave start, with diminishing returns when
+    multiple Quants are placed), `applyBountyAura(...)`, `stardustFromScore`.
+  - `games/orbital/lib/persist.js` — load/save run records and Stardust via
+    `Storage.getGameData('orbital')`.
+  - `games/orbital/lib/enemy-mods.js` — registry + `applyAll`/`tickAll`/
+    `drawAll`/`damageMul`/`bountyMul`/`isVisibleTo` for camo, lead,
+    fortified, swift, armored, regen.
+  - `games/orbital/lib/overlay.js` — `drawTierOverlay(ctx, tower)` adds
+    per-path accents (orange Path A, blue Path B; dots → rings → spikes →
+    crowns/auras as tier climbs) plus XP chevron pips. Also draws the small
+    `GLYPHS` (rate / dmg / range / pierce / splash / burn / etc.) used in
+    the upgrade-tree icons.
+  - `games/orbital/data/towers.js` — catalog for all 14 towers; each has
+    `base` stats + `paths.A`/`paths.B` with 4 tiers; each tier carries a
+    `cost`, `label`, `desc`, stat `patch`, glyph id, and optional `ability`.
+  - `games/orbital/data/abilities.js` — 28 active abilities with `cd`,
+    `glyph`, `color`, `activate`, optional `tick` and `multiplier`.
+  - `games/orbital/data/enemies.js` — `swarmer`, `ast`, `drone`, `bigast`,
+    `summoner`, `ufo`, `boss`, `titan`. Re-uses existing `orb_meteor_*` and
+    `orb_elite` sprites where possible; adds `orb_enemy_swarmer` +
+    `orb_enemy_summoner`.
+  - `games/orbital/data/rounds.js` — 50 rounds across 5 acts with metadata
+    for the recap banner: I First Contact, II Hidden Threats, III Heavy
+    Assault, IV Escalation, V Final Stand. Hand-tuned R1-R30, formulaic
+    R31-R50, with mid-bosses at R30/R45 and a mega-boss at R50.
+  - `games/orbital/ui/side-panel.js` — 240px-wide right rail. Sections:
+    big stats strip (CASH huge / LIVES + STARDUST / ROUND + act subtitle),
+    wave controls (START WAVE button + 1×/2× toggle), tower buy list with
+    hotkey hints, on selection a full per-tower view (stats line, two path
+    rows of 4 tier glyph buttons each with state coloring + path-cap lock,
+    tooltip on hover, TGT button, SELL refund). Click hit-testing routes to
+    `game.tryBuyTier`, `game.sellSelected`, `game.fireAbility`, etc.
+  - `games/orbital/ui/recap.js` — round-end banner showing base + streak +
+    combo bonus and total cash gained; "PERFECT WAVE" banner when no leaks.
+- **`games/orbital/sprites.js`** — added 4 tower SVGs (sniper, engineer,
+  cryo, chrono) and 2 enemy SVGs (swarmer, summoner). `manifest.js` got the
+  matching `orb_turret_*` / `orb_enemy_*` registrations.
+- **`games/orbital/game.js`** — rewritten as a slim orchestrator that
+  consumes `NDP.Orbital`. Real-time `dt` is split into `rdt` (UI/input) and
+  `sdt` (simulation, scaled by `gameSpeed`) so the 2× toggle from the prior
+  session interoperates cleanly with the new round/recap timing. Tower
+  update is generic (recoil, XP, ability cooldowns/ticks) and dispatches
+  to per-archetype `_update*` methods that read from the patched stats
+  block (`st.multiShot`, `st.capacitor`, `st.focusBuildup`, `st.stunPulse`,
+  `st.lance`, `st.bossDmg`, `st.mortar`, etc.). Damage application goes
+  through `EnemyMods.damageMul` so lead/armored/fortified gating happens
+  in one place. Combo + no-leak streak are counted live and consumed by
+  the recap. Enemy splits, summoner spawns, and all FX (tesla arcs,
+  support pulses, beams, flare lances, mine blooms, projectile homing,
+  freeze, brittle, fragmentation, splash) are reimplemented over the new
+  data shape.
+- **`index.html`** — wired all 14 new scripts in dependency order with
+  `?v=3` cache buster on every `games/orbital/*.js`.
 
 ### Orbital — Expansion plan drafted
 Sized up a full BTD5/BTD6-tier expansion for Orbital with the focus on tower

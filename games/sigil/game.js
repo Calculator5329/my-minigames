@@ -206,6 +206,11 @@
       this.bossFloaters = [];   // damage numbers
       this.shopRects = [];
 
+      // Milestone counters for theme-coin payout. The per-game wallet itself
+      // lives in Storage.getGameWallet('sigil') and is fed by chapter clears.
+      this.chaptersClearedThisRun = 0;
+      this.victoryAchieved = false;
+
       this.sfx = this.makeSfx({
         start:  { freq: 240, type: 'triangle', dur: 0.12, slide: 120, vol: 0.3 },
         good:   { freq: 520, type: 'triangle', dur: 0.2, slide: 400, vol: 0.45 },
@@ -403,6 +408,9 @@
       });
       this.save.bestChapter = Math.max(this.save.bestChapter, ch.n);
       saveData(this.save);
+      // Bank chapter clear into the per-game wallet (spendable in the Sanctum).
+      Storage.addGameWallet('sigil', 60 + ch.n * 40);
+      this.chaptersClearedThisRun++;
       this.phase = 'victory';
       this.victoryTimer = 0;
       this.particles.burst(CX, CY, 80, { color:'#f5d061', speed:340, life:1.0 });
@@ -415,7 +423,11 @@
       if (Input.mouse.justPressed) {
         Input.mouse.justPressed = false;
         this.chapterIx++;
-        if (this.chapterIx >= CHAPTERS.length) { this.win(); return; }
+        if (this.chapterIx >= CHAPTERS.length) {
+          this.victoryAchieved = true;
+          this.win();
+          return;
+        }
         // Refill HP between chapters and visit the sanctum shop.
         this.hp = this.maxHp;
         this.mana = this.maxMana;
@@ -437,11 +449,7 @@
             const p = r.perk;
             const owned = this.save.perks[p.id] || 0;
             if (owned >= p.max) return;
-            const coins = NDP.Engine.Storage.coins || 0;
-            if (coins < p.cost) return;
-            // Spend
-            NDP.Engine.Storage.coins = coins - p.cost;
-            NDP.Engine.Storage.save();
+            if (!Storage.spendGameWallet('sigil', p.cost)) return;
             this.save.perks[p.id] = owned + 1;
             saveData(this.save);
             this._applyPerks();
@@ -810,9 +818,9 @@
       ctx.fillText('SANCTUM · spend coins on perks', CX, 110);
       ctx.shadowBlur = 0;
 
-      const coins = NDP.Engine.Storage.coins || 0;
+      const coins = Storage.getGameWallet('sigil');
       ctx.fillStyle = '#ffd86b'; ctx.font = '16px ui-monospace, monospace';
-      ctx.fillText('● ' + coins + ' coins', CX, 150);
+      ctx.fillText('● ' + coins + ' essence', CX, 150);
 
       this.shopRects = [];
       const cardW = 180, cardH = 220, gap = 24;
@@ -861,7 +869,12 @@
       ctx.fillText('CONTINUE TO NEXT CHAPTER', CX, cy + ch/2);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 80)); }
+    coinsEarned(/* score */) {
+      // Theme-shop coins from chapter milestones, not from raw score.
+      const chapters = this.chaptersClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return chapters * 8 + winBonus;
+    }
   }
 
   // ===========================================================================

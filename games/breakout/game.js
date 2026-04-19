@@ -281,6 +281,11 @@
       this.lives = 3;
       this.combo = 0;
       this.lastBrickT = 0;
+      // Milestone counters for global theme-shop coins. Brick scoring funds
+      // the per-game wallet at end of run; theme coins are paid for worlds
+      // cleared this run plus a victory bonus.
+      this.worldsClearedThisRun = 0;
+      this.victoryAchieved = false;
 
       this.paddleX = W / 2;
       this.balls = [];
@@ -333,9 +338,13 @@
       this._refreshHud();
     }
 
-    onEnd() {
+    onEnd(score) {
       this.save.bestWorld = Math.max(this.save.bestWorld, this.worldIdx);
       saveData(this.save);
+      // Brick-score economy now funds the per-game wallet at the old rate.
+      // Theme-shop coins go through coinsEarned() and are milestone-based.
+      const purse = Math.max(0, Math.floor((score | 0) / 120));
+      if (purse > 0) Storage.addGameWallet('breakout', purse);
     }
 
     _refreshHud() {
@@ -504,6 +513,7 @@
       // End of a world. World 5 → boss; otherwise → shop.
       this.save.bestWorld = Math.max(this.save.bestWorld, this.worldIdx + 1);
       saveData(this.save);
+      this.worldsClearedThisRun++;
       if (this.worldIdx === WORLDS.length - 1) {
         this._startBoss();
       } else {
@@ -526,8 +536,8 @@
         if (r.kind === 'perk') {
           const p = r.perk;
           if (this.save.perks[p.id]) return;
-          if (Storage.getCoins() < p.cost) return;
-          if (!Storage.spendCoins(p.cost)) return;
+          if (Storage.getGameWallet('breakout') < p.cost) return;
+          if (!Storage.spendGameWallet('breakout', p.cost)) return;
           this.save.perks[p.id] = true;
           saveData(this.save);
           this.sfx.play('buy');
@@ -551,7 +561,10 @@
 
     _updVictory() {
       this.victoryTimer = (this.victoryTimer || 0) + 1 / 60;
-      if (this._consumeClick()) this.win();
+      if (this._consumeClick()) {
+        this.victoryAchieved = true;
+        this.win();
+      }
     }
 
     // ----------------------------------------------------------------- play
@@ -1364,9 +1377,9 @@
       ctx.fillText('PERK SHOP', cx, 90);
       ctx.shadowBlur = 0;
 
-      const coins = Storage.getCoins();
+      const coins = Storage.getGameWallet('breakout');
       ctx.fillStyle = '#fff'; ctx.font = '15px ui-monospace, monospace';
-      ctx.fillText(`Cleared World ${this.worldIdx + 1} of ${WORLDS.length}.   ● ${coins} coins`, cx, 124);
+      ctx.fillText(`Cleared World ${this.worldIdx + 1} of ${WORLDS.length}.   Brick fund: ● ${coins}`, cx, 124);
 
       this.shopRects = [];
       const cardW = 170, cardH = 200, gap = 12;
@@ -1484,7 +1497,10 @@
       ctx.fillText('Click to finish run', cx, 380);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 120)); }
+    // Global theme-shop coins: 5 per world cleared this run + 20 victory bonus.
+    coinsEarned(/*score*/) {
+      return (this.worldsClearedThisRun | 0) * 5 + (this.victoryAchieved ? 20 : 0);
+    }
   }
 
   // ---------- helpers ----------

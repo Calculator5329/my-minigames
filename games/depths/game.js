@@ -148,8 +148,54 @@
       this._randomizeFlavors();
       this.selectedClass = null;
       this.pickIdx = 0;
+      // Per-game wallet pattern: persistent state lives in Storage now.
+      // `_loadScore` also lifts the legacy `depths_hiscore` key forward
+      // exactly once per device.
       this.highscore = this._loadScore();
       this.coinsOut = 0;
+      // Milestone counters for the per-game-wallet pattern. `coinsEarned()`
+      // reads these to award *theme* coins; they intentionally never touch
+      // `player.gold` so the global theme economy stays decoupled from
+      // run-internal currency.
+      this.victoryAchieved = false;
+      this.floorsClearedThisRun = 0;
+      this._endTriggered = false;
+    }
+
+    // ---- per-game storage helpers ----
+    // `depths` doesn't extend BaseGame, so we plumb Storage manually. All
+    // Storage interactions go through these wrappers so the call sites stay
+    // readable.
+    _storage() {
+      return (typeof NDP !== 'undefined' && NDP.Engine && NDP.Engine.Storage) || null;
+    }
+    _migrateLegacy() {
+      const Storage = this._storage();
+      if (!Storage) return;
+      try {
+        const cur = Storage.getGameData('depths');
+        if (cur && Object.keys(cur).length) return;       // already migrated
+        const old = parseInt(localStorage.getItem('depths_hiscore') || '0', 10) || 0;
+        if (old <= 0) return;
+        Storage.setGameData('depths', { hiscore: old });
+        localStorage.removeItem('depths_hiscore');
+      } catch (_) {}
+    }
+    _bankGold() {
+      // Persist run-end gold into the per-game wallet. Called from `_die`
+      // and on victory so the player's coffers carry between runs.
+      const Storage = this._storage();
+      if (!Storage || !this.player) return;
+      try {
+        Storage.setGameWallet('depths', Math.max(0, this.player.gold | 0));
+      } catch (_) {}
+    }
+    _drawGold() {
+      // Inverse of `_bankGold`: pull persisted gold into a fresh run.
+      const Storage = this._storage();
+      if (!Storage) return 20;                           // pre-storage default
+      try { return Math.max(20, Storage.getGameWallet('depths') | 0); }
+      catch (_) { return 20; }
     }
 
     _mulberry(seed) {
@@ -204,10 +250,14 @@
       if (this.boundMove) { this.canvas.removeEventListener('mousemove', this.boundMove); this.boundMove = null; }
       if (this._raf) cancelAnimationFrame(this._raf);
     }
+    // Theme coins are awarded per *milestone*, never per in-run gold (which
+    // would leak the per-game wallet into the global theme pool). Floors
+    // cleared this run is the natural progress signal; victory bumps payout
+    // into the 25–50 capstone band described in the migration plan.
     coinsEarned() {
-      if (this.victory) return 60 + (this.player?this.player.level:0) * 5 + Math.floor((this.player?this.player.gold:0) / 50);
-      const base = Math.max(0, (this.floor - 1) * 2 + (this.player?this.player.level:0));
-      return base + Math.floor((this.player?this.player.gold:0) / 100);
+      const floors = this.floorsClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return floors * 4 + winBonus;
     }
 
     _loop() {
@@ -251,6 +301,12 @@
       this.log = [];
       this.deaths = 0;
       this.identified = {};
+      // Reset per-run milestone counters. Re-arm the engine handoff so the
+      // next death/victory triggers `gameOver()`/`win()` exactly once.
+      this.victoryAchieved = false;
+      this.floorsClearedThisRun = 0;
+      this._endTriggered = false;
+      this.state = 'playing';
       this.player = {
         x:0, y:0, ch:'@',
         cls: c,
@@ -263,7 +319,8 @@
         strBuff: 0, hasteTurns: 0, visionTurns: 0,
         poisonTurns: 0, confuseTurns: 0, stunTurns: 0,
         food: 1200, maxFood: 1500,
-        gold: 20,
+        // Gold persists between runs via the per-game wallet (NG+).
+        gold: this._drawGold(),
       };
       // starters
       for (const id of c.starter) {
@@ -689,6 +746,17 @@
       if (this.heartstoneHeld && this.floor === 8 && this.monsters.length === 0) {
         this.victory = true; this.scene = 'won';
         this._addLog('Silence. Victory.');
+        // Mirror the legacy hi-score formula so "score" on the end overlay
+        // reflects the run's true depth-and-loot achievement.
+        const s = (this.floor-1)*100 + (this.player?this.player.level*20:0) + (this.player?this.player.gold:0);
+        if (s > this.highscore) { this.highscore = s; this._saveScore(s); }
+        this.score = s;
+        this._bankGold();
+        if (!this._endTriggered) {
+          this._endTriggered = true;
+          this.victoryAchieved = true;
+          this.state = 'won';
+        }
       }
     }
 
@@ -730,6 +798,10 @@
       if (this._tile(this.player.x, this.player.y) !== T_STAIRS_DN) { this._addLog('No stairs here.'); return; }
       if (this.floor >= 8) return;
       this.items = this.items.filter(i=>!i.forsale); // clear old shop stock on descend
+      this.floorsClearedThisRun++;   // milestone: counts toward theme coins
+      // Bank gold every floor too — that way a hard crash mid-run still
+      // preserves most of the player's coffers.
+      this._bankGold();
       this._buildFloor(this.floor + 1);
     }
 
@@ -939,6 +1011,15 @@
       this._addLog(`You perish (${cause}). ENTER to retry.`);
       const s = (this.floor-1)*100 + (this.player?this.player.level*20:0) + (this.player?this.player.gold:0);
       if (s > this.highscore) { this.highscore = s; this._saveScore(s); }
+      // NG+/persistent: gold survives death via the per-game wallet.
+      this._bankGold();
+      this.score = s;
+      // Hand off to the engine state machine so main.js can show its end
+      // overlay and `coinsEarned()` (theme coins) gets called for this run.
+      if (!this._endTriggered) {
+        this._endTriggered = true;
+        this.state = 'over';
+      }
     }
 
     // ---------- enemy AI ----------
@@ -1066,8 +1147,17 @@
 
     _addLog(s) { this.log.push(s); if (this.log.length > 120) this.log.shift(); }
 
-    _loadScore() { try { return parseInt(localStorage.getItem('depths_hiscore')||'0',10) || 0; } catch(_) { return 0; } }
-    _saveScore(s) { try { localStorage.setItem('depths_hiscore', String(s)); } catch(_) {} }
+    _loadScore() {
+      this._migrateLegacy();
+      const Storage = this._storage();
+      if (!Storage) return 0;
+      try { return (Storage.getGameData('depths').hiscore | 0); } catch (_) { return 0; }
+    }
+    _saveScore(s) {
+      const Storage = this._storage();
+      if (!Storage) return;
+      try { Storage.mergeGameData('depths', { hiscore: s | 0 }); } catch (_) {}
+    }
 
     // ======================================================
     //                        DRAW

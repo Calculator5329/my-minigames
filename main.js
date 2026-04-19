@@ -278,6 +278,85 @@
 
   document.getElementById('back-btn').onclick = exitToSelector;
 
+  // ----- Feedback modal -----
+  const feedbackBtn      = document.getElementById('feedback-btn');
+  const feedbackModal    = document.getElementById('feedback-modal');
+  const feedbackClose    = document.getElementById('feedback-close');
+  const feedbackText     = document.getElementById('feedback-text');
+  const feedbackSend     = document.getElementById('feedback-send');
+  const feedbackCounter  = document.getElementById('feedback-counter');
+  const feedbackStatus   = document.getElementById('feedback-status');
+  const feedbackSub      = document.getElementById('feedback-sub');
+  const FEEDBACK_MAX = (NDP.Engine.Feedback && NDP.Engine.Feedback.MAX_LEN) || 2000;
+
+  function setFeedbackStatus(msg, kind) {
+    feedbackStatus.textContent = msg || '';
+    feedbackStatus.className = 'modal-status' + (kind ? ' ' + kind : '');
+  }
+
+  function openFeedback() {
+    if (!activeGame) return;
+    const m = activeGame.manifest;
+    feedbackSub.textContent = `Tell me what you think about ${m.title}.`;
+    feedbackText.value = '';
+    feedbackCounter.textContent = '0 / ' + FEEDBACK_MAX;
+    setFeedbackStatus('');
+    feedbackSend.disabled = false;
+    feedbackModal.classList.remove('hidden');
+    setTimeout(() => feedbackText.focus(), 0);
+    NDP.Engine.Feedback && NDP.Engine.Feedback.preload && NDP.Engine.Feedback.preload();
+  }
+
+  function closeFeedback() {
+    feedbackModal.classList.add('hidden');
+  }
+
+  async function sendFeedback() {
+    if (!activeGame) return;
+    const m = activeGame.manifest;
+    const text = feedbackText.value;
+    if (!text.trim()) {
+      setFeedbackStatus('Write something first.', 'bad');
+      return;
+    }
+    feedbackSend.disabled = true;
+    setFeedbackStatus('Sending\u2026');
+    try {
+      await NDP.Engine.Feedback.submit(m.id, m.title, text);
+      setFeedbackStatus('Thanks! Sent.', 'good');
+      feedbackText.value = '';
+      feedbackCounter.textContent = '0 / ' + FEEDBACK_MAX;
+      setTimeout(closeFeedback, 1200);
+    } catch (err) {
+      console.error('[feedback]', err);
+      const msg = (err && err.message) ? err.message : 'Could not send feedback.';
+      setFeedbackStatus(msg, 'bad');
+      feedbackSend.disabled = false;
+    }
+  }
+
+  feedbackBtn.onclick   = openFeedback;
+  feedbackClose.onclick = closeFeedback;
+  feedbackSend.onclick  = sendFeedback;
+  feedbackModal.addEventListener('click', (e) => {
+    if (e.target === feedbackModal) closeFeedback();
+  });
+  feedbackText.addEventListener('input', () => {
+    feedbackCounter.textContent = feedbackText.value.length + ' / ' + FEEDBACK_MAX;
+  });
+  feedbackText.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendFeedback();
+    }
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !feedbackModal.classList.contains('hidden')) {
+      e.stopPropagation();
+      closeFeedback();
+    }
+  }, true);
+
   // ----- Shop -----
   document.getElementById('shop-btn').onclick = openShop;
   document.getElementById('shop-back-btn').onclick = exitToSelector;

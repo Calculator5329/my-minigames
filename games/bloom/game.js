@@ -83,7 +83,11 @@
       this.powerups = [];
       this.dropTimer = 6;
 
-      this.runCoins = 0;     // earned this run, spendable post-run
+      // Persistent per-game wallet. Motes carry across runs; never crosses
+      // with the global theme-shop coins.
+      this.runCoins = Storage.getGameWallet('bloom');
+      this.biomesClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.bossActive = null;
 
       // Player buffs from powerups
@@ -342,6 +346,7 @@
         m.vx *= 0.92; m.vy *= 0.92;
         if (d < this.radius(this.player) + m.r) {
           this.runCoins += m.value;
+          Storage.addGameWallet('bloom', m.value);
           this.addScore(8);
           this.sfx.play('coin', { freq: 1000 + this.runCoins * 8 });
           this.particles.burst(m.x, m.y, 6, { color: '#7ae0ff', speed: 180, life: 0.4 });
@@ -568,6 +573,7 @@
       this.save.bossesBeaten[s.kind + this.biomeIx] = true;
       this.bossActive = null;
       this.runCoins += 30;
+      Storage.setGameWallet('bloom', this.runCoins);
       this.addScore(400);
       this.flash('#fff', 0.4);
       this.shake(20, 0.6);
@@ -576,10 +582,22 @@
       // Auto-advance after a beat
       this.intermissionT = 0;
       this.phase = 'biomeUp';
-      if (this.biomeIx < BIOMES.length - 1) this.advanceBiome();
+      if (this.biomeIx < BIOMES.length - 1) {
+        this.advanceBiome();
+      } else {
+        // Final biome boss down — campaign cleared.
+        this.biomesClearedThisRun++;
+        this.victoryAchieved = true;
+        this.save.bestBiome = Math.max(this.save.bestBiome, this.biomeIx + 1);
+        this.save.bestScore = Math.max(this.save.bestScore, this.score);
+        saveData(this.save);
+        Storage.setGameWallet('bloom', this.runCoins);
+        this.win();
+      }
     }
 
     advanceBiome() {
+      this.biomesClearedThisRun++;
       this.biomeIx++;
       const b = BIOMES[this.biomeIx];
       this.biomeTime = 0;
@@ -620,6 +638,7 @@
       this.save.bestScore = Math.max(this.save.bestScore, this.score);
       this.save.bestBiome = Math.max(this.save.bestBiome, this.biomeIx);
       saveData(this.save);
+      Storage.setGameWallet('bloom', this.runCoins);
       this.phase = 'shop';
     }
 
@@ -640,9 +659,8 @@
       // Continue button
       const cx = W/2 - 90, cy = 480;
       if (mx >= cx && mx <= cx + 180 && my >= cy && my <= cy + 50) {
-        // commit run coins as score-derived coins above the engine's payout
-        Storage.addCoins(this.runCoins);
-        this.runCoins = 0;
+        // Persistent wallet — motes carry to next run; no payout to global coins.
+        Storage.setGameWallet('bloom', this.runCoins);
         this.gameOver();
       }
     }
@@ -651,7 +669,7 @@
       const tier = this.save[item.key] || 0;
       if (tier >= item.tiers) return;
       const cost = item.cost[tier];
-      if (this.runCoins < cost) {
+      if (!Storage.spendGameWallet('bloom', cost)) {
         this.flash('#f87171', 0.1);
         return;
       }
@@ -868,11 +886,12 @@
       ctx.fillText('FINISH RUN', cx + 90, cy + 25);
     }
 
-    coinsEarned(score) {
-      // Engine still adds coin payout from score; but we already banked motes
-      // when the player left the shop. Keep a small base from score so the
-      // global coin currency still ticks.
-      return Math.max(0, Math.floor(score / 80));
+    coinsEarned(/* score */) {
+      // Theme-shop coins come from biome milestones, not from mote pickups
+      // (motes live in the per-game wallet now).
+      const biomes = this.biomesClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return biomes * 8 + winBonus;
     }
   }
 

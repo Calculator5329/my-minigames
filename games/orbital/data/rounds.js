@@ -125,7 +125,8 @@
     { from: 41, to: 50, name: 'Act V — Final Stand',        color: '#a070ff' }
   ];
   function actFor(round) {
-    for (const a of ACTS) if (round >= a.from && round <= a.to) return a;
+    const r = Math.max(1, round | 0);
+    for (const a of ACTS) if (r >= a.from && r <= a.to) return a;
     return ACTS[ACTS.length - 1];
   }
 

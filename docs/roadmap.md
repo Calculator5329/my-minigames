@@ -53,6 +53,12 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
       https://github.com/Calculator5329/my-minigames, deployed to
       https://notdop-minigames.web.app via Firebase Hosting in project
       `ethan-488900` (dedicated multi-site slot `notdop-minigames`).
+- [x] **Feedback inbox (2026-04-19)** — `💬 Feedback` button in the arcade
+      topbar writes per-game free-text feedback to Firestore collection
+      `feedback` (project `ethan-488900`, default DB). No auth, write-only
+      from clients, owner reads via the Firebase Console. Rules in
+      `firestore.rules` need manual merge into the Console (shared DB with
+      other apps in the project — see `docs/changelog.md`).
 - [x] **Depth pass — Shallow Six (2026-04-19)** — Bloom, Deflect, Stargazer,
       Ricochet, Sigil, Diner all rebuilt with progression, bosses, perks, and
       custom inline-SVG art via the new `engine/sprites.js`.
@@ -94,21 +100,54 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 - [ ] Sound: replace 404'd sample assets (`assets/audio/hit.mp3`, `coin.mp3`, `launch.mp3`) with synth fallbacks or commit the files.
 - [ ] Mobile / touch input pass — many games assume mouse + keyboard.
 - [ ] Accessibility audit (color contrast on themes, key bindings).
-- [ ] Optional: build pipeline to bundle script tags so `index.html` doesn't grow linearly per game.
+- [ ] **Site quality pass (2026-04-19)** — see
+      `docs/plans/2026-04-19-selector-loader-pwa.md`. 4-phase plan:
+      [x] Phase 1 repo hygiene (36 root PNGs → `docs/screenshots/`,
+          consolidated gitignore, refreshed firebase.json),
+      [ ] Phase 2 auto-discovery loader (`engine/loader.js` +
+          `games/manifest.json`, single `?v=<sha>` cache-buster),
+      [ ] Phase 3 selector UX (search, sort, tag chips, Continue rail
+          of 5, keyboard nav, IntersectionObserver throttling),
+      [ ] Phase 4 PWA (`manifest.webmanifest`, versioned cache-first
+          service worker, install prompt). Replaces the older
+          standalone "build pipeline" item.
 - [ ] Next-tier depth pass (the ones that haven't gotten one yet): Tanks
       single-screen battles, Skybound endless runner, Barrage simple shooter,
       Switchboard nights pass.
-- [ ] **Orbital — huge expansion (planning)** — see
-      `docs/plans/2026-04-19-orbital-expansion.md`. Four phases: tower depth
-      pass (two-path upgrade trees, tower XP, active abilities, targeting
-      priorities, round economy, panel UI redesign), content breadth (4 new
-      towers, 5 new enemy mods, 30 → 50 rounds), maps + difficulty (3 new
-      maps, Hard / Apocalypse modes), heroes + meta (3 heroes, Star Charts
-      persistent tree, Endless mode, daily challenge, sandbox).
+- [x] **Orbital — expansion Phase 1 + Phase 2 (2026-04-19)** — shipped per
+      `docs/plans/2026-04-19-orbital-expansion.md`. Split monolithic
+      `game.js` into `data/`, `lib/`, `ui/` modules under a new
+      `NDP.Orbital` namespace; narrowed the play area for a persistent
+      BTD4-style right-rail panel showing prominent stats + tower shop +
+      full per-tower upgrade tree (replaces the old popup); two 4-tier
+      upgrade paths per tower with a path-cap rule; tower XP / levels;
+      28 active abilities reachable from upgrade nodes (Q/E hotkeys);
+      First/Last/Strong/Close targeting priorities; 6 enemy mods (camo,
+      lead, fortified, swift, armored, regen); 50-round campaign across
+      five named acts; round-end recap with no-leak streak + combo bonuses;
+      4 new towers (Sniper, Engineer, Cryo, Chrono); 2 new enemy types
+      (swarmer, summoner); programmatic per-path tier overlays on tower
+      sprites + XP chevron pips so towers visibly evolve as they upgrade;
+      Stardust meta-currency persisted across runs.
+- [x] **Orbital — Phase 2.5 polish (2026-04-19)** — two-column tower shop
+      (no more off-screen catalog), BTD4-style round-gated tower unlocks
+      with persistent best-round, locked-tower tiles + tooltips + unlock
+      toast on round clear, two new towers (Mortar R11, Crystal R17), and
+      a beefier upgrade-overlay tier system (T1 glow dot → T2 ring + pip
+      badge → T3 chevron spikes / cardinal star + orbiting plate → T4
+      pulsing aura with rotating spoke ring, counter-rotating dashed ring,
+      orbiting energy beads, and crowning lance/gem glyph).
+- [ ] **Orbital — expansion Phase 3 (maps + difficulty)** — three new map
+      geometries (branching, double-loop, choke-point), Hard + Apocalypse
+      difficulties with mod-density and HP scalars per-act.
+- [ ] **Orbital — expansion Phase 4 (heroes + meta)** — three heroes with
+      level curves and ult abilities, Star Charts persistent skill tree
+      spending Stardust, Endless mode after R50, rotating daily challenge,
+      sandbox map.
 
 ## Decision log
 - **Static, no build** — keep the project hackable from any folder. New games slot in by adding two `<script>` tags. Don't add a bundler unless game count crosses ~50.
 - **Score = total earned** for tycoon-flavored games (`franchise`, `reactor`) — gives players a clean cumulative target.
 - **Coin formula varies per game** — calibrated so a typical run earns ~5–15 coins (themes cost 150–600).
-- **Per-game currency vs. global coins (2026-04-19)** — Each game's *in-game* currency (vault coins, reactor credits, diner cash, etc.) lives in its own per-game persistent wallet via `Storage.getGameWallet(id)` / `addGameWallet` / `spendGameWallet` and is **never** added to the global theme-shop pool. The global `Storage.coins` is its own thing, fed only by each game's `coinsEarned()` (which should be derived from milestones/levels, not from in-run currency pickups). Vaultbreaker is the reference implementation; Reactor/Diner/Orbital meta-economies should follow the same pattern when next touched.
-- **Vaultbreaker victory = wipe (2026-04-19)** — Beating the 7-vault campaign clears all unlocks AND the persistent coin wallet. The reset is the trophy. Use `Storage.clearGameData(id)` for any future "campaign won" wipes.
+- **Per-game currency vs. global coins (2026-04-19, MIGRATION COMPLETE)** — Every game's in-game currency lives in its own per-game persistent wallet via `Storage.getGameWallet(id)` / `addGameWallet` / `spendGameWallet` and is **never** added to the global theme-shop pool. The global `Storage.coins` is its own thing, fed only by each game's `coinsEarned()` which is **always** milestone-based (levels/waves/biomes/etc. cleared this run + victory bonus), never derived from `floor(score / N)` if score is inflated by pickups. Reference: `games/vaultbreaker/game.js`. Recipe: `docs/plans/2026-04-19-currency-migration.md`. New games MUST follow this rule.
+- **Vaultbreaker victory = wipe (2026-04-19)** — Beating the 7-vault campaign clears all unlocks AND the persistent coin wallet. The reset is the trophy. Use `Storage.clearGameData(id)` for any future "campaign won" wipes. Default for new games is NG+/persistent (no wipe); clean-slate is opt-in per-game.

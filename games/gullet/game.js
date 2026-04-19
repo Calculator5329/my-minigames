@@ -1,11 +1,17 @@
 /* Gullet — sandworm eruption hunt with energy, critter variety, biome stages,
-   and persistent pre-run upgrades. */
+   and persistent pre-run upgrades.
+
+   Currency model: per-game wallet ('Gore') under Storage.*GameWallet
+   ('gullet'). Pre-run shop spends Gore only. Wallet awarded at end-of-run
+   from biome milestones (third biome is endless, so victoryAchieved never
+   triggers — by design). NG+/persistent. */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
   const SURFACE = H * 0.58;
+  const GID = 'gullet';
 
   const BIOMES = [
     { name: 'REEF',   scoreTo:  400, sky: ['#ffb874','#ff7a50'], dirt: '#5a3921', critters: ['farmer','cow','bird'] },
@@ -44,6 +50,8 @@
       this.chainBonus = this.save.upgrades.chain * 0.5;
 
       this.biomeIdx = 0;
+      this.biomesClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.worm = {
         x: W / 2, yBase: SURFACE + 40,
         y: SURFACE + 40, vy: 0,
@@ -74,6 +82,11 @@
         bestScore: Math.max(this.save.bestScore, this.score),
         upgrades: this.save.upgrades
       });
+    }
+
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
     }
 
     spawnCritter() {
@@ -116,6 +129,7 @@
 
       // biome progression by score
       while (this.biomeIdx < BIOMES.length - 1 && this.score >= BIOMES[this.biomeIdx].scoreTo) {
+        this.biomesClearedThisRun++;
         this.biomeIdx++;
         this.sfx.play('biome');
         this.flash(BIOMES[this.biomeIdx].sky[0], 0.3);
@@ -221,6 +235,7 @@
       if (this.hp <= 0) {
         this.phase = 'done';
         this._writeSave();
+        this._awardWallet();
         this.gameOver();
         return;
       }
@@ -289,22 +304,19 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('gullet', {
-                    bestScore: this.save.bestScore,
-                    upgrades: this.save.upgrades
-                  });
-                  this.sfx.play('buy');
-                  // refresh live stats
-                  this.maxEnergy = 100 + this.save.upgrades.energy * 25;
-                  this.energy = this.maxEnergy;
-                  this.maxHp = 3 + this.save.upgrades.armor;
-                  this.hp = this.maxHp;
-                  this.coneMul = 1 + this.save.upgrades.cone * 0.2;
-                  this.chainBonus = this.save.upgrades.chain * 0.5;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('gullet', {
+                  bestScore: this.save.bestScore,
+                  upgrades: this.save.upgrades
+                });
+                this.sfx.play('buy');
+                this.maxEnergy = 100 + this.save.upgrades.energy * 25;
+                this.energy = this.maxEnergy;
+                this.maxHp = 3 + this.save.upgrades.armor;
+                this.hp = this.maxHp;
+                this.coneMul = 1 + this.save.upgrades.cone * 0.2;
+                this.chainBonus = this.save.upgrades.chain * 0.5;
               }
               return;
             }
@@ -487,9 +499,9 @@
       ctx.fillStyle = '#a58abd';
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('reach the ABYSS. best: ' + this.save.bestScore + ' pts', W / 2, 96);
-      ctx.fillStyle = '#ffcc33';
+      ctx.fillStyle = '#ff7744';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Gore: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -498,7 +510,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -533,7 +545,11 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 60)); }
+    coinsEarned() {
+      const cleared = this.biomesClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return cleared * 6 + winBonus;
+    }
   }
 
   NDP.attachGame('gullet', GulletGame);

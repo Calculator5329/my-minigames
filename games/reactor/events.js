@@ -96,6 +96,7 @@
       game.heat = Math.min(game.maxHeat + 30, game.heat + 25);
       game.emitFloat(game.reactor.x, game.reactor.y - 70, '+25 HEAT', '#ff5e7e');
       game.flash('#ff3a3a', 0.15);
+      if (game._logHeat) game._logHeat('meteor', 'Meteor strike', 25);
     } else {
       const id = m.target.id;
       const had = game.modules[id] || 0;
@@ -205,11 +206,13 @@
       id: 'risky_loan',
       title: 'Risky Loan',
       desc: '+$2,500 BUT +30 heat',
+      danger: true,
       apply(game) {
         game.cash += 2500; game.totalEarned += 2500;
         game.heat = Math.min(game.maxHeat + 25, game.heat + 30);
         game.emitFloat(game.reactor.x, game.reactor.y - 70, 'LOAN +$2500', '#ffd86b');
         game.emitFloat(game.reactor.x, game.reactor.y - 50, '+30 HEAT', '#ff5e7e');
+        if (game._logHeat) game._logHeat('risky_loan', 'Risky Loan', 30);
       }
     },
     {
@@ -274,7 +277,13 @@
     const inv = game.events.investor;
     if (!inv) return;
     inv.t += dt;
-    if (inv.t >= inv.autoPickAt) pickInvestorCard(game, 0);
+    if (inv.t >= inv.autoPickAt) {
+      /* Auto-pick the first SAFE card so a player who didn't see the modal
+         isn't silently punished by Risky Loan. */
+      let idx = inv.cards.findIndex(c => !c.danger);
+      if (idx < 0) idx = 0;
+      pickInvestorCard(game, idx);
+    }
   }
 
   /* ---------- Aurora ---------- */
@@ -295,6 +304,7 @@
     game.emitFloat(W * 0.5, 80, 'REACTOR SURGE!', '#ff5e7e');
     game.flash('#ff3a3a', 0.18);
     game.shake(8, 0.3);
+    if (game._logHeat) game._logHeat('surge', 'Reactor surge', 50);
   }
 
   /* ---------- Lunar Quake ---------- */
@@ -579,11 +589,19 @@
       const x = startX + i * (cardW + gap);
       const r = { x, y, w: cardW, h: cardH };
       inv.rects.push(r);
-      ctx.fillStyle = '#0f1726';
+      ctx.fillStyle = c.danger ? '#1a0a10' : '#0f1726';
       ctx.fillRect(x, y, cardW, cardH);
-      const accent = ['#ffd86b', '#7cd9ff', '#ff5e7e'][i % 3];
-      ctx.strokeStyle = accent; ctx.lineWidth = 2;
+      const accent = c.danger ? '#ff3a3a' : ['#ffd86b', '#7cd9ff', '#a78bfa'][i % 3];
+      ctx.strokeStyle = accent; ctx.lineWidth = c.danger ? 3 : 2;
       ctx.strokeRect(x + 1, y + 1, cardW - 2, cardH - 2);
+      if (c.danger) {
+        ctx.fillStyle = '#ff3a3a';
+        ctx.fillRect(x, y + cardH - 22, cardW, 22);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px ui-monospace, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('DANGER  ·  ADDS HEAT', x + cardW/2, y + cardH - 11);
+      }
       /* number badge */
       ctx.fillStyle = accent;
       ctx.font = 'bold 16px ui-monospace, monospace';
@@ -601,7 +619,8 @@
       /* hint */
       ctx.fillStyle = '#8892a6';
       ctx.font = '11px ui-monospace, monospace';
-      ctx.fillText('Click or press ' + (i + 1), x + cardW/2, y + cardH - 22);
+      const hintY = c.danger ? y + cardH - 38 : y + cardH - 22;
+      ctx.fillText('Click or press ' + (i + 1), x + cardW/2, hintY);
     }
     return inv.rects;
   }

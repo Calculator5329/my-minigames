@@ -79,6 +79,20 @@
       this.mode = 'playing';        /* 'playing' | 'investor' | 'recap' */
       this.recap = null;
       this.dayStats = Campaign().freshDayStats(this.day);
+      /* Per-run milestone counters used for global-coin payout. */
+      this.daysCompletedThisRun = 0;
+      this.victoryAchieved = false;
+
+      /* --- Diagnostics: heat-event log + day-intro --- */
+      /* Ring buffer of {t, source, label, amount, after} so the player can
+         see WHY they died on the meltdown recap. Source examples:
+           'meteor', 'surge', 'risky_loan', 'flare', 'throttle'. */
+      this.heatLog = [];
+      this.peakHeatPct = 0;
+      this.sustainedHigh = 0;       /* seconds spent above 70% with throttle>0.6 */
+      this._lastSustainLog = 0;
+      this.dayIntroT = 0;
+      this.dayIntroLines = [];
 
       /* --- Layout (positions, gauges, cards) --- */
       this.layout();
@@ -108,17 +122,41 @@
       this.maxCoolant = this.baseMaxCoolant;
       Modules().applyEffects(this);
 
-      /* --- Starfield/atmosphere --- */
+      /* --- Starfield / atmosphere ---
+         Three parallax bands so panning the eye across the sky gives a real
+         sense of depth: tiny far stars, mid-bright stars, and a few large
+         twinkling beacons. */
       this.starfield = [];
-      for (let i = 0; i < 110; i++) {
+      for (let i = 0; i < 180; i++) {
+        const band = Math.random();
+        const layer = band < 0.55 ? 0 : (band < 0.9 ? 1 : 2);
         this.starfield.push({
           x: Math.random() * W,
           y: Math.random() * H * 0.55,
           tw: Math.random() * Math.PI * 2,
-          tws: 0.6 + Math.random() * 1.6,
-          s: Math.random() < 0.1 ? 1.6 : 0.9
+          tws: 0.4 + Math.random() * 1.6,
+          s: layer === 0 ? 0.7 : (layer === 1 ? 1.1 : 1.7),
+          layer,
+          col: layer === 2 ? (Math.random() < 0.4 ? '#ffd6a8' : '#cfe9ff') : '#ffffff'
         });
       }
+      /* Slow drifting comm satellites — never collide with reactor area. */
+      this.satellites = [];
+      for (let i = 0; i < 3; i++) {
+        this.satellites.push({
+          x: Math.random() * W,
+          y: 30 + Math.random() * H * 0.35,
+          vx: 6 + Math.random() * 10,
+          phase: Math.random() * Math.PI * 2
+        });
+      }
+      /* Distant comm towers on the horizon — pure decoration with blinking
+         nav lights. Positioned in 'world' coords; rendered behind the dome. */
+      this.commTowers = [
+        { x: W * 0.06, h: 64, blink: 0 },
+        { x: W * 0.16, h: 38, blink: 0.7 },
+        { x: W * 0.93, h: 52, blink: 1.4 }
+      ];
       this.cracks = [];
 
       /* --- Events runtime for the current day --- */
@@ -127,8 +165,82 @@
       /* --- Comet showers schedule (boss-day scripted) --- */
       this._scheduleBossEvents();
 
+      /* Seed the intro banner for day 1 so first-time players get a hint
+         about the throttle / vent loop. */
+      this.dayIntroLines = this._dayIntroFor(this.day);
+      this.dayIntroT = this.dayIntroLines.length ? 6 : 0;
+
       this.setHud(this._hud());
       this.setScore(0);
+    }
+
+    /* Push an entry into the heat log used for the post-mortem. Trims to the
+       last 30 entries so the recap stays readable. Called from events.js
+       and from the throttle/vent paths in this file. */
+    _logHeat(source, label, amount) {
+      this.heatLog.push({
+        t: this.dayTime | 0,
+        source,
+        label,
+        amount: amount | 0,
+        after: Math.round((this.heat / this.maxHeat) * 100)
+      });
+      if (this.heatLog.length > 30) this.heatLog.shift();
+    }
+
+    /* Produce a human-readable "what's new this day" line list. Rendered as a
+       fading top-of-screen banner for the first ~6s of each day. Returns an
+       empty array on days without notable changes. */
+    _dayIntroFor(day) {
+      if (this.isEndless) {
+        return [
+          'ENDLESS MODE',
+          'Threats stack — survive as long as you can.'
+        ];
+      }
+      switch (day) {
+        case 1: return [
+          'DAY 1 — Smelt helium-3, sell, repeat.',
+          'Drag the THROTTLE up. Keep heat below 100%. Use VENT (Space) when red.'
+        ];
+        case 2: return [
+          'DAY 2 — Investor visits begin.',
+          'Pick offers carefully. RISKY LOAN gives cash but adds heat.'
+        ];
+        case 3: return [
+          'DAY 3 — Reactor surges (random +50 heat spikes).',
+          'Hold throttle lower. Keep coolant ready.'
+        ];
+        case 4: return [
+          'DAY 4 — Lunar quakes can crack modules.',
+          'Build SHIELDING to deflect impacts.'
+        ];
+        case 5: return [
+          'DAY 5 — BOSS: Comet shower at 30s.',
+          'Vent before, build LASER + SHIELDING to survive.'
+        ];
+        case 6: return [
+          'DAY 6 — Aurora bursts boost income.',
+          'Push throttle when it lights up cyan.'
+        ];
+        case 7: return [
+          'DAY 7 — Meteors arrive in pairs.',
+          'Laser intercepts and shielding earn their keep.'
+        ];
+        case 8: return [
+          'DAY 8 — Solar flares last twice as long.',
+          'Auto-stabilizer or rapid venting recommended.'
+        ];
+        case 9: return [
+          'DAY 9 — Hardened systems: meltdown threshold tighter.',
+          'Stay cool. Stockpile cash for evac bonus.'
+        ];
+        case 10: return [
+          'DAY 10 — FINAL: Comet shower at 40s.',
+          'Survive to win. End-of-day cash → 50% evac bonus.'
+        ];
+        default: return [];
+      }
     }
 
     /* Position pods around the reactor and lay out cards on the right. */
@@ -237,6 +349,7 @@
       }
       this.emitFloat(this.reactor.x, this.reactor.y - 80, 'VENT', '#7cd9ff');
       if (this.dayStats) this.dayStats.vents = (this.dayStats.vents | 0) + 1;
+      this._logHeat('vent', 'Emergency vent', -35);
     }
 
     fireRocket() {
@@ -340,6 +453,17 @@
       }
       /* Twinkle */
       for (const s of this.starfield) s.tw += s.tws * dt;
+      /* Slow satellite drift — wraps off the right edge. */
+      if (this.satellites) {
+        for (const s of this.satellites) {
+          s.x += s.vx * dt;
+          s.phase += dt * 4;
+          if (s.x > W + 30) {
+            s.x = -30;
+            s.y = 30 + Math.random() * H * 0.35;
+          }
+        }
+      }
     }
 
     _updateRecap(dt) {
@@ -373,9 +497,12 @@
       if (this.events.investor) {
         this.events.investor.t += dt;
         if (this.events.investor.t >= this.events.investor.autoPickAt) {
-          /* Auto-pick first card. */
-          const first = this.events.investor.cards[0];
-          if (first) first.apply(this);
+          /* Auto-pick the first SAFE card (skip danger:true cards like
+             Risky Loan) so an idle player isn't silently melted. */
+          const cards = this.events.investor.cards;
+          const safeIdx = cards.findIndex(c => !c.danger);
+          const pick = cards[safeIdx >= 0 ? safeIdx : 0];
+          if (pick) pick.apply(this);
           this.events.investor = null;
           this.sfx.play('buy', { freq: 600 });
         }
@@ -449,6 +576,34 @@
         if (this.throttle >= 0.30) this.dayStats.timeAbove30 += dt;
         if (this.heat / this.maxHeat > 0.90) this.dayStats.overheated = true;
       }
+
+      /* Track peak heat % for the post-mortem. */
+      const heatPct = this.heat / this.maxHeat;
+      if (heatPct > this.peakHeatPct) this.peakHeatPct = heatPct;
+
+      /* Sustained high-throttle is the most common silent killer. Log it as a
+         single rolling entry (replaces the previous one) so the recap can show
+         "Held throttle high for 6.0s" — with the actual time accumulated. */
+      if (this.throttle > 0.6 && heatPct > 0.7) {
+        this.sustainedHigh += dt;
+        if (this.dayTime - this._lastSustainLog > 1.5) {
+          this._lastSustainLog = this.dayTime;
+          /* Replace the trailing entry if it was the same source, else push. */
+          const last = this.heatLog[this.heatLog.length - 1];
+          if (last && last.source === 'throttle') {
+            last.label = 'High throttle ' + this.sustainedHigh.toFixed(1) + 's';
+            last.t = this.dayTime | 0;
+            last.after = Math.round(heatPct * 100);
+          } else {
+            this._logHeat('throttle', 'High throttle ' + this.sustainedHigh.toFixed(1) + 's', 0);
+          }
+        }
+      } else if (heatPct < 0.5) {
+        this.sustainedHigh = 0;
+      }
+
+      /* Day-intro banner fade. */
+      if (this.dayIntroT > 0) this.dayIntroT -= dt;
 
       /* Heat dynamics — same tuning as before. */
       const heatIn = this.throttle * 80 * dt;
@@ -624,8 +779,37 @@
       }
       /* 10% ejection penalty. */
       this.totalEarned = Math.max(0, this.totalEarned * 0.9);
+      /* Compute a one-line cause-of-death from the last few heat events. */
+      this.deathCause = this._diagnoseMeltdown();
       this.recap = Campaign().buildRecap(this, 'meltdown');
       this.mode = 'recap';
+    }
+
+    /* Look at the last 6s of the heat log and pick the dominant story. The
+       resulting string is rendered as a red sub-headline on the meltdown
+       recap so the player understands what actually killed them. */
+    _diagnoseMeltdown() {
+      const cutoff = (this.dayTime | 0) - 6;
+      const recent = this.heatLog.filter(e => e.t >= cutoff && e.amount > 0);
+      const cfg = Campaign().getDayConfig(this.day);
+      const peak = Math.round(this.peakHeatPct * 100);
+      if (recent.length === 0) {
+        return 'Heat ran away from sustained high throttle (peak ' + peak + '%). ' +
+               'Lower throttle sooner, or build a Coolant Loop.';
+      }
+      /* Sum impact by source label. */
+      const totals = {};
+      for (const e of recent) totals[e.label] = (totals[e.label] | 0) + e.amount;
+      let bestLabel = null, bestAmt = -1;
+      for (const k in totals) if (totals[k] > bestAmt) { bestAmt = totals[k]; bestLabel = k; }
+      let tip = '';
+      if (/Risky Loan/i.test(bestLabel))   tip = ' Skip Risky Loan when heat is already > 60%.';
+      else if (/Reactor surge/i.test(bestLabel)) tip = ' After a surge, vent immediately.';
+      else if (/Meteor/i.test(bestLabel))  tip = ' Build Shielding or Laser to survive impacts.';
+      else if (/Solar flare/i.test(bestLabel)) tip = ' Ride the throttle DOWN during flares.';
+      else if (/throttle/i.test(bestLabel)) tip = ' Lower throttle sooner; the slider only cools below 30%.';
+      return bestLabel + ' added +' + bestAmt + ' heat in 6s ' +
+             '(peak ' + peak + '% / cap ' + (cfg.meltdownHardCap | 0) + '%).' + tip;
     }
 
     _endDay() {
@@ -645,6 +829,9 @@
       } else {
         kind = 'day_complete';
       }
+      /* Day completed (any kind that doesn't bail before this point). */
+      this.daysCompletedThisRun = (this.daysCompletedThisRun | 0) + 1;
+      if (kind === 'campaign_complete') this.victoryAchieved = true;
       this.recap = Campaign().buildRecap(this, kind);
       this.mode = 'recap';
     }
@@ -666,6 +853,14 @@
       this._scheduleBossEvents();
       this.cracks = [];
       this.flash('#7cd9ff', 0.18);
+      /* Reset diagnostics for the new day and surface the "what's new" tip. */
+      this.heatLog = [];
+      this.peakHeatPct = 0;
+      this.sustainedHigh = 0;
+      this._lastSustainLog = 0;
+      this.deathCause = null;
+      this.dayIntroLines = this._dayIntroFor(this.day);
+      this.dayIntroT = this.dayIntroLines.length ? 6 : 0;
     }
 
     /* ---------- HUD ---------- */
@@ -687,8 +882,10 @@
       );
     }
 
-    coinsEarned(score) {
-      return Math.max(0, Math.floor(score / 400));
+    coinsEarned() {
+      const d = this.daysCompletedThisRun | 0;
+      const win = this.victoryAchieved ? 25 : 0;
+      return Math.max(0, d * 4 + win);
     }
 
     /* ---------- Render ---------- */
@@ -710,6 +907,8 @@
       this._drawGauges(ctx);
       this._drawCards(ctx);
       this._drawTopBanner(ctx);
+      this._drawCriticalBanner(ctx);
+      this._drawDayIntro(ctx);
       this._drawFloaters(ctx);
 
       /* Event overlays */
@@ -759,32 +958,138 @@
     /* ---------- Render helpers ---------- */
 
     _drawSky(ctx) {
+      /* Layered base — deep space blends into a faint magenta horizon. */
       const sky = ctx.createLinearGradient(0, 0, 0, H);
-      sky.addColorStop(0, '#070b1a'); sky.addColorStop(0.55, '#0a0e1f'); sky.addColorStop(1, '#100716');
+      sky.addColorStop(0, '#050816');
+      sky.addColorStop(0.45, '#0a0e22');
+      sky.addColorStop(0.78, '#150a26');
+      sky.addColorStop(1, '#1a0a18');
       ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+      /* Two soft nebulas — radial gradients painted with low alpha. They
+         shift colour with the campaign day for a subtle visual progression. */
+      const dayProgressN = this.isEndless ? 1 : Math.min(1, (this.day - 1) / Campaign().TOTAL_DAYS);
+      const tintA = `rgba(${120 + dayProgressN * 120 | 0},${60 + dayProgressN * 40 | 0},200,0.10)`;
+      const tintB = `rgba(80,${140 - dayProgressN * 60 | 0},${200 - dayProgressN * 80 | 0},0.10)`;
+      let g = ctx.createRadialGradient(W * 0.20, H * 0.15, 10, W * 0.20, H * 0.15, 320);
+      g.addColorStop(0, tintA); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.6);
+      g = ctx.createRadialGradient(W * 0.78, H * 0.30, 10, W * 0.78, H * 0.30, 280);
+      g.addColorStop(0, tintB); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.6);
+
+      /* Stars — three depth bands. Far stars dim and tight, near stars bright,
+         largest stars emit a tiny cross flare on twinkle peak. */
       for (const s of this.starfield) {
-        const a = 0.3 + 0.7 * Math.abs(Math.sin(s.tw));
-        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        const tw = Math.abs(Math.sin(s.tw));
+        const baseA = s.layer === 0 ? 0.25 : (s.layer === 1 ? 0.55 : 0.85);
+        const a = baseA + tw * (1 - baseA);
+        if (s.layer === 2) {
+          /* Cross flare on big stars when twinkle is bright. */
+          if (tw > 0.85) {
+            ctx.strokeStyle = `rgba(255,235,200,${(tw - 0.85) * 4})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(s.x - 4, s.y); ctx.lineTo(s.x + 4, s.y);
+            ctx.moveTo(s.x, s.y - 4); ctx.lineTo(s.x, s.y + 4);
+            ctx.stroke();
+          }
+          ctx.fillStyle = s.col;
+        } else {
+          ctx.fillStyle = `rgba(255,255,255,${a})`;
+        }
         ctx.fillRect(s.x, s.y, s.s, s.s);
       }
-      /* Earth-rise scales with day (gradually higher as campaign progresses). */
+
+      /* Drifting satellites — small triangle with a faint trail. */
+      if (this.satellites) {
+        for (const sat of this.satellites) {
+          ctx.fillStyle = 'rgba(207,233,255,0.7)';
+          ctx.beginPath();
+          ctx.moveTo(sat.x, sat.y);
+          ctx.lineTo(sat.x - 4, sat.y - 1);
+          ctx.lineTo(sat.x - 4, sat.y + 1);
+          ctx.closePath(); ctx.fill();
+          /* Blinking light. */
+          const blink = (Math.sin(sat.phase) + 1) * 0.5;
+          ctx.fillStyle = `rgba(255,80,80,${blink})`;
+          ctx.fillRect(sat.x - 1, sat.y - 1, 2, 2);
+          /* Faint streak behind. */
+          ctx.strokeStyle = 'rgba(207,233,255,0.18)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(sat.x - 5, sat.y);
+          ctx.lineTo(sat.x - 22, sat.y);
+          ctx.stroke();
+        }
+      }
+
+      /* Earth-rise scales with day. Add cloud band + atmospheric halo. */
       const dayProgress = this.isEndless ? 1 : Math.min(1, (this.day - 1 + this.dayTime / DAY_LENGTH) / Campaign().TOTAL_DAYS);
-      const earthY = H * 0.18 - dayProgress * 60;
+      const ex = W * 0.85, earthY = H * 0.18 - dayProgress * 60, er = 44;
+      /* Atmospheric halo */
+      const halo = ctx.createRadialGradient(ex, earthY, er * 0.85, ex, earthY, er * 1.6);
+      halo.addColorStop(0, 'rgba(120,180,255,0.35)');
+      halo.addColorStop(1, 'rgba(120,180,255,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(ex, earthY, er * 1.6, 0, Math.PI * 2); ctx.fill();
+      /* Body */
       ctx.save();
-      ctx.shadowColor = '#4fa8ff'; ctx.shadowBlur = 30;
-      ctx.fillStyle = '#1f4a8a';
-      ctx.beginPath(); ctx.arc(W * 0.85, earthY, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowColor = '#4fa8ff'; ctx.shadowBlur = 24;
+      const eb = ctx.createRadialGradient(ex - 14, earthY - 14, 4, ex, earthY, er);
+      eb.addColorStop(0, '#3a78c6');
+      eb.addColorStop(0.7, '#1f4a8a');
+      eb.addColorStop(1, '#0c2347');
+      ctx.fillStyle = eb;
+      ctx.beginPath(); ctx.arc(ex, earthY, er, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
+      /* Continents */
       ctx.fillStyle = '#3da55a';
-      ctx.beginPath(); ctx.arc(W * 0.835, earthY - 5, 12, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(W * 0.87, earthY + 12, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex - 13, earthY - 5, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex + 17, earthY + 12, 9, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#2a3d6a';
-      ctx.beginPath(); ctx.arc(W * 0.815, earthY + 8, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.beginPath(); ctx.arc(W * 0.85 + 12, earthY, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex - 35, earthY + 8, 6, 0, Math.PI * 2); ctx.fill();
+      /* Clouds — thin band */
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(ex - 6, earthY + 2, er * 0.85, 4, -0.18, 0, Math.PI * 2);
+      ctx.stroke();
+      /* Night-side shadow */
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      ctx.beginPath(); ctx.arc(ex + 12, earthY, er, 0, Math.PI * 2); ctx.fill();
     }
 
     _drawSurface(ctx) {
+      /* Distant comm towers — drawn behind the jagged silhouette so their
+         bases get hidden by terrain. Pure decoration; blinking nav lights
+         tied to wallclock time so they're never in sync. */
+      if (this.commTowers) {
+        for (const t of this.commTowers) {
+          const baseY = H * 0.74;
+          ctx.strokeStyle = 'rgba(80,90,110,0.55)';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(t.x, baseY);
+          ctx.lineTo(t.x, baseY - t.h);
+          ctx.stroke();
+          /* Guy wires */
+          ctx.beginPath();
+          ctx.moveTo(t.x - t.h * 0.25, baseY);
+          ctx.lineTo(t.x, baseY - t.h * 0.6);
+          ctx.lineTo(t.x + t.h * 0.25, baseY);
+          ctx.stroke();
+          /* Antenna ring */
+          ctx.strokeStyle = 'rgba(110,140,180,0.65)';
+          ctx.beginPath(); ctx.arc(t.x, baseY - t.h, 4, 0, Math.PI * 2); ctx.stroke();
+          /* Blinking light */
+          const blink = (Math.sin(this.time * 2 + t.blink) + 1) * 0.5;
+          ctx.fillStyle = `rgba(255,80,80,${0.3 + blink * 0.7})`;
+          ctx.beginPath(); ctx.arc(t.x, baseY - t.h - 4, 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+
+      /* Jagged horizon silhouette. */
       ctx.fillStyle = '#1a1828';
       ctx.beginPath();
       ctx.moveTo(0, H * 0.74);
@@ -795,18 +1100,58 @@
       ctx.lineTo(W, H * 0.78); ctx.lineTo(0, H * 0.78);
       ctx.closePath(); ctx.fill();
 
+      /* Lunar surface gradient. */
       const surf = ctx.createLinearGradient(0, H * 0.78, 0, H);
-      surf.addColorStop(0, '#1c1d2a'); surf.addColorStop(1, '#0d0d18');
+      surf.addColorStop(0, '#1c1d2a'); surf.addColorStop(1, '#0a0a13');
       ctx.fillStyle = surf;
       ctx.fillRect(0, H * 0.78, W, H * 0.22);
-      ctx.fillStyle = '#0a0a13';
-      [[0.08, 0.92, 36], [0.22, 0.97, 24], [0.78, 0.88, 30], [0.92, 0.95, 22], [0.6, 0.96, 18]].forEach(([cx, cy, r]) => {
-        ctx.beginPath(); ctx.ellipse(cx * W, cy * H, r, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
-      });
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
-      [[0.08, 0.92, 36], [0.22, 0.97, 24], [0.78, 0.88, 30]].forEach(([cx, cy, r]) => {
-        ctx.beginPath(); ctx.ellipse(cx * W, cy * H, r, r * 0.4, 0, 0, Math.PI * 2); ctx.stroke();
-      });
+
+      /* Reactor light cast — soft elliptical glow on the ground tinted by
+         current heat colour. Stronger when throttle is high. */
+      const heatPct = clamp(this.heat / this.maxHeat, 0, 1.3);
+      const cast = this._heatColor(heatPct);
+      const intensity = 0.25 + this.throttle * 0.45;
+      const gx = this.reactor.x, gy = H * 0.84;
+      const lg = ctx.createRadialGradient(gx, gy, 20, gx, gy, 320);
+      lg.addColorStop(0, cast.rgba(0.30 * intensity));
+      lg.addColorStop(0.5, cast.rgba(0.10 * intensity));
+      lg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, 320, 80, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      /* Craters with rim highlight. */
+      const craters = [
+        [0.08, 0.92, 36], [0.22, 0.97, 24], [0.78, 0.88, 30],
+        [0.92, 0.95, 22], [0.6, 0.96, 18], [0.34, 0.96, 14], [0.5, 0.93, 11]
+      ];
+      for (const [cx, cy, r] of craters) {
+        const x = cx * W, y = cy * H;
+        /* Crater bowl */
+        ctx.fillStyle = '#0a0a13';
+        ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+        /* Bright rim arc on the side closest to the reactor for fake lighting */
+        const lit = x < gx ? -1 : 1;
+        ctx.strokeStyle = cast.rgba(0.18 + intensity * 0.18);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(x + lit * 1.2, y - 1, r, r * 0.4, 0, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+        /* Subtle outer scatter */
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.4, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      /* Surface speckle for grit. */
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      for (let i = 0; i < 40; i++) {
+        const sx = (i * 91 + (this.day | 0) * 13) % W;
+        const sy = H * 0.82 + ((i * 53) % (H * 0.16));
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+
       for (const d of this.dust) {
         const a = 1 - d.age / d.life;
         ctx.fillStyle = `rgba(180,180,200,${a * 0.3})`;
@@ -816,44 +1161,105 @@
 
     _drawDome(ctx) {
       const baseCX = this.reactor.x, baseCY = H * 0.78, baseR = 360;
+      /* Soft inner glow tinted slightly by reactor heat for atmosphere. */
+      const heatPct = clamp(this.heat / this.maxHeat, 0, 1.2);
+      const tintR = Math.round(124 + heatPct * 80);
+      const tintG = Math.round(217 - heatPct * 100);
+      const tintB = Math.round(255 - heatPct * 80);
       const grad = ctx.createRadialGradient(baseCX - 80, baseCY - 80, 20, baseCX, baseCY, baseR);
-      grad.addColorStop(0, 'rgba(124,217,255,0.10)');
+      grad.addColorStop(0, `rgba(${tintR},${tintG},${tintB},0.12)`);
+      grad.addColorStop(0.7, `rgba(${tintR},${tintG},${tintB},0.04)`);
       grad.addColorStop(1, 'rgba(124,217,255,0.0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(baseCX, baseCY, baseR, Math.PI, 0); ctx.fill();
-      ctx.strokeStyle = 'rgba(124,217,255,0.4)';
+
+      /* Faint hex grid hinting at structural panels — stays subtle. */
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(baseCX, baseCY, baseR - 2, Math.PI, 0);
+      ctx.lineTo(baseCX + baseR - 2, baseCY);
+      ctx.lineTo(baseCX - baseR + 2, baseCY);
+      ctx.closePath();
+      ctx.clip();
+      ctx.strokeStyle = `rgba(${tintR},${tintG},${tintB},0.08)`;
+      ctx.lineWidth = 1;
+      const hexS = 36;
+      for (let y = baseCY - baseR; y < baseCY; y += hexS * 0.86) {
+        const offset = ((y / (hexS * 0.86)) | 0) % 2 === 0 ? 0 : hexS / 2;
+        for (let x = baseCX - baseR + offset; x < baseCX + baseR; x += hexS) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + hexS / 2, y + hexS * 0.43);
+          ctx.lineTo(x + hexS, y);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+
+      /* Outer rim. */
+      ctx.strokeStyle = `rgba(${tintR},${tintG},${tintB},0.45)`;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(baseCX, baseCY, baseR, Math.PI, 0); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-      ctx.lineWidth = 1;
+
+      /* Specular highlight sweep on the upper-left of the dome. */
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.arc(baseCX - 50, baseCY - 30, baseR - 30, Math.PI * 1.05, Math.PI * 1.4);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+      ctx.beginPath();
+      ctx.arc(baseCX - 30, baseCY - 50, baseR - 60, Math.PI * 1.10, Math.PI * 1.35);
+      ctx.stroke();
+
+      /* Dome base ring — visual seam where dome meets surface. */
+      ctx.strokeStyle = `rgba(${tintR},${tintG},${tintB},0.35)`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(baseCX, baseCY, baseR, 14, 0, 0, Math.PI, false);
       ctx.stroke();
     }
 
     _drawPipes(ctx) {
-      ctx.strokeStyle = '#26303d'; ctx.lineWidth = 6;
+      const heatPct = clamp(this.heat / this.maxHeat, 0, 1.3);
+      const flowSpeed = 60 + heatPct * 120 + this.throttle * 80;
+      const dashOffset = -((this.time * flowSpeed) % 24);
+
       Modules().CATALOG.forEach(m => {
         if (!(this.modules[m.id] || 0)) return;
         const p = this.modulePositions[m.id];
         if (!p) return;
+        /* Outer pipe casing */
+        ctx.strokeStyle = '#1a2230';
+        ctx.lineWidth = 8;
         ctx.beginPath();
         ctx.moveTo(this.reactor.x, this.reactor.y);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
-      });
-      ctx.strokeStyle = 'rgba(255,180,80,0.35)';
-      ctx.lineWidth = 2;
-      Modules().CATALOG.forEach(m => {
-        if (!(this.modules[m.id] || 0)) return;
-        const p = this.modulePositions[m.id];
-        if (!p) return;
+        /* Inner energy stream — animated dashed line in the module's own
+           colour, so each pipe is recognisable. */
+        ctx.strokeStyle = m.color;
+        ctx.globalAlpha = 0.55 + 0.35 * Math.sin(this.time * 4 + p.x * 0.05);
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 6]);
+        ctx.lineDashOffset = dashOffset;
         ctx.beginPath();
         ctx.moveTo(this.reactor.x, this.reactor.y);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        /* Bright connector node where the pipe meets the reactor — glow
+           pulses with throttle so high power literally lights up. */
+        const glow = 0.4 + this.throttle * 0.6;
+        ctx.fillStyle = m.color;
+        ctx.globalAlpha = glow;
+        ctx.beginPath();
+        ctx.arc(this.reactor.x, this.reactor.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
       });
     }
 
@@ -862,31 +1268,101 @@
       const coreColor = this._heatColor(heatPct);
       const pulse = 1 + Math.sin(this.time * 8 + this.heat * 0.05) * 0.05 * (0.4 + this.throttle);
       const r = this.reactor.r * pulse;
+      const cx = this.reactor.x, cy = this.reactor.y;
+
+      /* Plasma exhaust column — visible whenever the throttle is doing work.
+         Triangular shape rising from the core; its tail intensity scales with
+         throttle and heat. Drawn first so the core overlaps the base. */
+      if (this.throttle > 0.05) {
+        const colH = 90 + this.throttle * 80;
+        const colW = 12 + this.throttle * 14;
+        const grad = ctx.createLinearGradient(cx, cy - r, cx, cy - r - colH);
+        grad.addColorStop(0, coreColor.rgba(0.55 + this.throttle * 0.3));
+        grad.addColorStop(0.4, coreColor.rgba(0.25));
+        grad.addColorStop(1, coreColor.rgba(0));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(cx - colW, cy - r);
+        ctx.quadraticCurveTo(cx - colW * 0.4, cy - r - colH * 0.6, cx, cy - r - colH);
+        ctx.quadraticCurveTo(cx + colW * 0.4, cy - r - colH * 0.6, cx + colW, cy - r);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      /* Outer rotating containment ring — segmented arcs, opposite-spin pair. */
+      ctx.lineCap = 'round';
+      const baseR = r + 32;
+      for (let pass = 0; pass < 2; pass++) {
+        const dir = pass === 0 ? 1 : -1;
+        ctx.strokeStyle = coreColor.rgba(0.45 + heatPct * 0.4);
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          const a0 = (i / 4) * Math.PI * 2 + this.time * 0.7 * dir;
+          ctx.beginPath();
+          ctx.arc(cx, cy, baseR + pass * 8, a0, a0 + Math.PI * 0.32);
+          ctx.stroke();
+        }
+      }
+      ctx.lineCap = 'butt';
+
+      /* Core body */
       ctx.save();
-      ctx.shadowColor = coreColor.css; ctx.shadowBlur = 30 + heatPct * 50;
+      ctx.shadowColor = coreColor.css; ctx.shadowBlur = 36 + heatPct * 60;
       ctx.fillStyle = '#101828';
-      ctx.beginPath(); ctx.arc(this.reactor.x, this.reactor.y, r + 18, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = coreColor.css;
-      ctx.beginPath(); ctx.arc(this.reactor.x, this.reactor.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r + 18, 0, Math.PI * 2); ctx.fill();
+      const coreGrad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, 2, cx, cy, r);
+      coreGrad.addColorStop(0, '#ffffff');
+      coreGrad.addColorStop(0.35, coreColor.rgba(0.95));
+      coreGrad.addColorStop(1, coreColor.rgba(0.65));
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
+
+      /* Inner white-hot eye */
       ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = 0.4 + heatPct * 0.5;
-      ctx.beginPath(); ctx.arc(this.reactor.x, this.reactor.y, r * 0.45 * pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.55 + heatPct * 0.4;
+      ctx.beginPath(); ctx.arc(cx, cy, r * 0.32 * pulse, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
+
+      /* Pulsating energy halo */
       ctx.strokeStyle = coreColor.rgba(0.7);
       ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(this.reactor.x, this.reactor.y, r + 8 + Math.sin(this.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, r + 8 + Math.sin(this.time * 6) * 1.5, 0, Math.PI * 2); ctx.stroke();
+
+      /* Static containment shroud */
       ctx.strokeStyle = '#3a4660'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(this.reactor.x, this.reactor.y, r + 22, 0, Math.PI * 2); ctx.stroke();
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2 + this.time * 0.3;
-        const x1 = this.reactor.x + Math.cos(a) * (r + 22);
-        const y1 = this.reactor.y + Math.sin(a) * (r + 22);
-        const x2 = this.reactor.x + Math.cos(a) * (r + 28);
-        const y2 = this.reactor.y + Math.sin(a) * (r + 28);
-        ctx.strokeStyle = coreColor.rgba(0.5);
+      ctx.beginPath(); ctx.arc(cx, cy, r + 22, 0, Math.PI * 2); ctx.stroke();
+
+      /* Tick marks around the shroud */
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2 + this.time * 0.18;
+        const x1 = cx + Math.cos(a) * (r + 22);
+        const y1 = cy + Math.sin(a) * (r + 22);
+        const x2 = cx + Math.cos(a) * (r + 28);
+        const y2 = cy + Math.sin(a) * (r + 28);
+        ctx.strokeStyle = coreColor.rgba(i % 4 === 0 ? 0.8 : 0.35);
+        ctx.lineWidth = i % 4 === 0 ? 2 : 1;
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       }
+
+      /* Random electric arcs leaping off the core when over-heating. */
+      if (heatPct > 0.85 && this.mode === 'playing' && Math.random() < 0.4) {
+        ctx.strokeStyle = `rgba(255,255,255,${0.5 + Math.random() * 0.4})`;
+        ctx.lineWidth = 1 + Math.random() * 1.5;
+        const a = Math.random() * Math.PI * 2;
+        const x0 = cx + Math.cos(a) * r;
+        const y0 = cy + Math.sin(a) * r;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        let x = x0, y = y0;
+        for (let s = 0; s < 4; s++) {
+          x += Math.cos(a) * 8 + (Math.random() - 0.5) * 12;
+          y += Math.sin(a) * 8 + (Math.random() - 0.5) * 12;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
       if (Math.random() < 0.6 * (0.3 + this.throttle) && this.mode === 'playing') {
         const a = Math.random() * Math.PI * 2;
         this.particles.emit({
@@ -905,26 +1381,205 @@
         if (!p) return;
         const count = this.modules[m.id] || 0;
         const owned = count > 0;
-        ctx.fillStyle = owned ? '#1a2230' : 'rgba(40,46,60,0.4)';
-        ctx.fillRect(p.x - 22, p.y - 18, 44, 36);
+
+        /* Soft owned-glow halo so populated pods read at a glance and the
+           scene gets a colourful constellation of activity. */
+        if (owned) {
+          const halo = ctx.createRadialGradient(p.x, p.y, 4, p.x, p.y, 30);
+          halo.addColorStop(0, this._tint(m.color, 0.35));
+          halo.addColorStop(1, this._tint(m.color, 0));
+          ctx.fillStyle = halo;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 30, 0, Math.PI * 2); ctx.fill();
+        }
+
+        /* Pod chassis with bevelled edge. */
+        const cx = p.x - 22, cy = p.y - 18, w = 44, h = 36;
+        const podGrad = ctx.createLinearGradient(cx, cy, cx, cy + h);
+        if (owned) {
+          podGrad.addColorStop(0, '#22304a');
+          podGrad.addColorStop(1, '#0e1622');
+        } else {
+          podGrad.addColorStop(0, 'rgba(40,46,60,0.55)');
+          podGrad.addColorStop(1, 'rgba(20,24,36,0.45)');
+        }
+        ctx.fillStyle = podGrad;
+        ctx.fillRect(cx, cy, w, h);
+        /* Inner highlight strip (top edge) */
+        if (owned) {
+          ctx.fillStyle = 'rgba(255,255,255,0.07)';
+          ctx.fillRect(cx, cy, w, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.25)';
+          ctx.fillRect(cx, cy + h - 2, w, 2);
+        }
         ctx.strokeStyle = owned ? m.color : 'rgba(120,130,150,0.3)';
         ctx.lineWidth = 2;
-        ctx.strokeRect(p.x - 22, p.y - 18, 44, 36);
+        ctx.strokeRect(cx + 1, cy + 1, w - 2, h - 2);
+
+        /* Glyph + per-module animated overlay drawn on top. */
         Modules().drawGlyph(ctx, m.id, p.x, p.y - 2, m.color, owned);
+        if (owned) this._drawModuleAnim(ctx, m, p);
+
         if (count > 0) {
+          /* Count badge — pill in the top-right corner. */
+          const tx = p.x + 14, ty = p.y - 14;
           ctx.fillStyle = m.color;
-          ctx.font = 'bold 11px ui-monospace, monospace';
-          ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-          ctx.fillText('×' + count, p.x + 20, p.y + 16);
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(tx - 11, ty - 7, 24, 14, 3);
+          else ctx.rect(tx - 11, ty - 7, 24, 14);
+          ctx.fill();
+          ctx.fillStyle = '#0a1020';
+          ctx.font = 'bold 10px ui-monospace, monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('×' + count, tx + 1, ty);
         }
+
+        /* Status LED bottom-left — heartbeat. */
         if (owned) {
           const ind = 0.5 + 0.5 * Math.sin(this.time * 5 + p.x * 0.01);
           ctx.fillStyle = m.color;
           ctx.globalAlpha = 0.4 + ind * 0.6;
-          ctx.fillRect(p.x - 18, p.y + 12, 6, 3);
+          ctx.fillRect(cx + 4, cy + h - 6, 5, 3);
           ctx.globalAlpha = 1;
         }
       });
+    }
+
+    /* Per-module living detail overlaid on the static glyph. Kept tiny so
+       the sprite still reads as the same module — these are micro-motions:
+       rotating fans, drilling bits, tracking turrets, pumping pistons. */
+    _drawModuleAnim(ctx, m, p) {
+      const t = this.time;
+      ctx.save();
+      ctx.translate(p.x, p.y - 2);
+      switch (m.id) {
+        case 'cool': {
+          /* Fan blades spinning around the cool icon's centre. */
+          ctx.rotate(t * 4);
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = 0.6;
+          ctx.lineWidth = 1.2;
+          for (let i = 0; i < 3; i++) {
+            ctx.rotate(Math.PI * 2 / 3);
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.quadraticCurveTo(3, -2, 6, -1);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 'rig': {
+          /* Drill-bit shake */
+          const sh = Math.sin(t * 30) * 0.6;
+          ctx.translate(sh, 0);
+          ctx.fillStyle = m.color;
+          ctx.globalAlpha = 0.7;
+          ctx.fillRect(5, -2, 4, 5);
+          ctx.fillRect(7, 3, 1, 3);
+          break;
+        }
+        case 'solar': {
+          /* Panel tilt sweep */
+          const tilt = Math.sin(t * 0.6) * 0.18;
+          ctx.translate(0, 8);
+          ctx.rotate(tilt);
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = 0.55;
+          ctx.lineWidth = 1;
+          for (let i = -1; i <= 1; i++) {
+            ctx.strokeRect(-7, i * 1.5 - 1, 14, 0.6);
+          }
+          break;
+        }
+        case 'laser': {
+          /* Turret aim sway */
+          const aim = Math.sin(t * 1.5) * 0.4;
+          ctx.rotate(aim);
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = 0.55;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(0, -5); ctx.lineTo(0, -14);
+          ctx.stroke();
+          break;
+        }
+        case 'pump': {
+          /* Piston bobbing */
+          const bob = (Math.sin(t * 4) + 1) * 1.5;
+          ctx.fillStyle = m.color;
+          ctx.globalAlpha = 0.6;
+          ctx.fillRect(-2, -8 + bob, 4, 2);
+          break;
+        }
+        case 'hab': {
+          /* Window flicker */
+          const fl = (Math.sin(t * 7) + Math.sin(t * 13)) * 0.5 + 0.5;
+          ctx.fillStyle = m.color;
+          ctx.globalAlpha = 0.4 + fl * 0.4;
+          ctx.fillRect(-2, -2, 4, 4);
+          break;
+        }
+        case 'pad': {
+          /* Beacon strobe */
+          const fl = (Math.sin(t * 3) + 1) * 0.5;
+          ctx.fillStyle = '#ffd86b';
+          ctx.globalAlpha = fl;
+          ctx.fillRect(-1, -12, 2, 2);
+          break;
+        }
+        case 'core': {
+          /* Inner counter-rotating ring */
+          ctx.rotate(-t * 1.2);
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = 0.5;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 7, 3, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+        }
+        case 'shield': {
+          /* Outer shield shimmer */
+          const a = 0.25 + 0.35 * Math.abs(Math.sin(t * 2));
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = a;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, -12); ctx.lineTo(10, -7); ctx.lineTo(10, 5);
+          ctx.lineTo(0, 12); ctx.lineTo(-10, 5); ctx.lineTo(-10, -7);
+          ctx.closePath();
+          ctx.stroke();
+          break;
+        }
+        case 'auto': {
+          /* Inner ring rotation */
+          ctx.rotate(t * 1.6);
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = 0.55;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.arc(0, 0, 5, -Math.PI * 0.4, Math.PI * 0.4);
+          ctx.stroke();
+          break;
+        }
+        case 'box': {
+          /* Latch indicator pulse */
+          const fl = (Math.sin(t * 4) + 1) * 0.5;
+          ctx.fillStyle = '#4ade80';
+          ctx.globalAlpha = 0.4 + fl * 0.4;
+          ctx.fillRect(-1, -1, 2, 2);
+          break;
+        }
+      }
+      ctx.restore();
+    }
+
+    /* Tint helper — converts a hex colour into an rgba string at the given
+       alpha. Used by the module halo gradient. */
+    _tint(hex, alpha) {
+      const h = hex.replace('#', '');
+      const r = parseInt(h.substr(0, 2), 16);
+      const g = parseInt(h.substr(2, 2), 16);
+      const b = parseInt(h.substr(4, 2), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
     }
 
     _drawWorkers(ctx) {
@@ -1045,6 +1700,7 @@
       ctx.beginPath();
       ctx.arc(cx, cy, r, startA, startA + total * visPct, false);
       ctx.stroke();
+      /* Tick at 100% (max heat — alarm zone begins). */
       const hot = this._heatColor(1);
       ctx.strokeStyle = hot.css; ctx.lineWidth = 3;
       const tickFrac = 1 / SCALE_MAX;
@@ -1053,6 +1709,29 @@
       ctx.moveTo(cx + Math.cos(ang) * (r - 14), cy + Math.sin(ang) * (r - 14));
       ctx.lineTo(cx + Math.cos(ang) * (r + 8), cy + Math.sin(ang) * (r + 8));
       ctx.stroke();
+      ctx.fillStyle = hot.css;
+      ctx.font = 'bold 9px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const lblA = ang;
+      ctx.fillText('MAX',
+        cx + Math.cos(lblA) * (r + 22),
+        cy + Math.sin(lblA) * (r + 22));
+
+      /* Tick at meltdown hard cap — the actual fail line. */
+      const cfg = Campaign().getDayConfig(this.day);
+      const meltFrac = Math.min(SCALE_MAX, cfg.meltdownHardCap / this.maxHeat) / SCALE_MAX;
+      const mAng = startA + total * meltFrac;
+      ctx.strokeStyle = '#ff3a3a'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(mAng) * (r - 18), cy + Math.sin(mAng) * (r - 18));
+      ctx.lineTo(cx + Math.cos(mAng) * (r + 12), cy + Math.sin(mAng) * (r + 12));
+      ctx.stroke();
+      ctx.fillStyle = '#ff5e7e';
+      ctx.font = 'bold 9px ui-monospace, monospace';
+      ctx.fillText('MELTDOWN',
+        cx + Math.cos(mAng) * (r + 28),
+        cy + Math.sin(mAng) * (r + 28));
+
       ctx.fillStyle = '#cfe9ff';
       ctx.font = 'bold 12px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1062,7 +1741,8 @@
       ctx.fillText(((this.heat / this.maxHeat) * 100 | 0) + '%', cx, cy + 4);
       ctx.fillStyle = '#8892a6';
       ctx.font = '10px ui-monospace, monospace';
-      ctx.fillText(this.heat.toFixed(0) + ' / ' + this.maxHeat, cx, cy + 26);
+      ctx.fillText(this.heat.toFixed(0) + ' / ' + this.maxHeat +
+        '  ·  cap ' + (cfg.meltdownHardCap | 0), cx, cy + 26);
 
       const barX = cx - 70, barY = cy + 56, barW = 140, barH = 10;
       ctx.fillStyle = '#0a1020';
@@ -1161,6 +1841,58 @@
       ctx.fillRect(0, 38, W, 2);
       ctx.fillStyle = '#7cd9ff';
       ctx.fillRect(0, 38, W * pct, 2);
+    }
+
+    /* Big mid-screen warning whenever heat is in the kill zone. Tells the
+       player exactly what to do (vent / cut throttle) so day-2 deaths stop
+       feeling like ambushes. Only drawn during play. */
+    _drawCriticalBanner(ctx) {
+      if (this.mode !== 'playing') return;
+      if (this.heat <= this.maxHeat) return;
+      const cfg = Campaign().getDayConfig(this.day);
+      const over = clamp((this.heat - this.maxHeat) / Math.max(1, cfg.meltdownHardCap - this.maxHeat), 0, 1);
+      const pulse = 0.55 + 0.45 * Math.abs(Math.sin(this.time * 8));
+      const y = 56;
+      const w = 520, h = 64;
+      const x = (W - w) / 2;
+      ctx.fillStyle = `rgba(40,4,8,${0.55 + over * 0.25})`;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = `rgba(255,58,58,${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.fillStyle = `rgba(255,90,90,${pulse})`;
+      ctx.font = 'bold 18px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('CRITICAL  ·  ' + ((this.heat / this.maxHeat) * 100 | 0) + '%   MELTDOWN AT ' + (cfg.meltdownHardCap | 0) + '%', x + w/2, y + 22);
+      ctx.fillStyle = '#ffd86b';
+      ctx.font = 'bold 13px ui-monospace, monospace';
+      const action = this.ventCooldown > 0
+        ? 'CUT THROTTLE — vent in ' + this.ventCooldown.toFixed(1) + 's'
+        : 'PRESS SPACE TO VENT  ·  drop throttle below 30%';
+      ctx.fillText(action, x + w/2, y + 46);
+    }
+
+    /* Per-day intro banner: surfaces what's new this day so the player isn't
+       blindsided by mechanics that didn't exist yesterday. Auto-fades. */
+    _drawDayIntro(ctx) {
+      if (this.dayIntroT <= 0 || this.dayIntroLines.length === 0) return;
+      if (this.mode !== 'playing') return;
+      const a = Math.min(1, this.dayIntroT / 1.5);
+      const w = 560, h = 60;
+      const x = (W - w) / 2;
+      const y = H - 110;
+      ctx.fillStyle = `rgba(8,14,28,${0.82 * a})`;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = `rgba(124,217,255,${0.9 * a})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.fillStyle = `rgba(124,217,255,${a})`;
+      ctx.font = 'bold 13px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(this.dayIntroLines[0] || '', x + w/2, y + 18);
+      ctx.fillStyle = `rgba(207,233,255,${a})`;
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.fillText(this.dayIntroLines[1] || '', x + w/2, y + 40);
     }
 
     _drawFloaters(ctx) {

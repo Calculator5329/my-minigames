@@ -34,7 +34,10 @@
       this.enemyThink = 0;
       this.weaponIdx = 0;
       this.nukeUsed = false;
-      this.coinsHeld = 0;
+      // Per-game persistent wallet — coins carry between tanks runs.
+      this.coinsHeld = Storage.getGameWallet('tanks');
+      this.matchesWonThisRun = 0;
+      this.victoryAchieved = false;
       this.phase = 'fight';  // 'fight' | 'intermission'
       this.shopRects = [];
       this.sfx = this.makeSfx({
@@ -402,12 +405,19 @@
         // coins from this match
         const earned = 30 + this.map * 15 + Math.floor(this.playerHP * 0.5);
         this.coinsHeld += earned;
+        this.matchesWonThisRun++;
+        Storage.setGameWallet('tanks', this.coinsHeld);
         this.message = '+' + earned + ' coins';
-        if (this.map >= this.maxMap) { this.win(); return; }
+        if (this.map >= this.maxMap) {
+          this.victoryAchieved = true;
+          this.win();
+          return;
+        }
         // intermission shop
         this.phase = 'intermission';
         return;
       } else {
+        Storage.setGameWallet('tanks', this.coinsHeld);
         this.gameOver();
       }
     }
@@ -427,7 +437,7 @@
             }
             if (r.kind === 'buy') {
               const w = WEAPONS[r.i];
-              if (!this.save.weapons.includes(w.id) && this.coinsHeld >= w.cost) {
+              if (!this.save.weapons.includes(w.id) && Storage.spendGameWallet('tanks', w.cost)) {
                 this.coinsHeld -= w.cost;
                 this.save.weapons.push(w.id);
                 this._writeSave();
@@ -650,7 +660,12 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'continue' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 250)); }
+    coinsEarned(/* score */) {
+      // Theme-shop coins from match milestones, not from in-run kills.
+      const matches = this.matchesWonThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return matches * 4 + winBonus;
+    }
   }
 
   function drawTank(ctx, x, y, color, barrelAngle) {

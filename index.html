@@ -33,10 +33,29 @@
     <button class="icon-btn" id="back-btn">&larr; Back</button>
     <span class="game-title" id="game-title"></span>
     <span class="hud" id="hud"></span>
+    <button class="icon-btn" id="feedback-btn" title="Send feedback on this game">&#x1F4AC; Feedback</button>
   </div>
   <div class="stage">
     <canvas id="stage-canvas" width="960" height="600"></canvas>
     <div class="overlay hidden" id="overlay"></div>
+  </div>
+</div>
+
+<div id="feedback-modal" class="modal-backdrop hidden">
+  <div class="modal-card" role="dialog" aria-labelledby="feedback-title" aria-modal="true">
+    <header class="modal-head">
+      <h2 id="feedback-title">Feedback</h2>
+      <button class="icon-btn" id="feedback-close" title="Close">&times;</button>
+    </header>
+    <p class="modal-sub" id="feedback-sub">Tell me what you think.</p>
+    <textarea id="feedback-text" class="modal-textarea"
+              placeholder="Bugs, ideas, what felt good, what didn't&hellip;"
+              maxlength="2000" rows="6"></textarea>
+    <div class="modal-foot">
+      <span class="modal-counter" id="feedback-counter">0 / 2000</span>
+      <span class="modal-status" id="feedback-status"></span>
+      <button class="icon-btn" id="feedback-send">Send</button>
+    </div>
   </div>
 </div>
 
@@ -57,6 +76,8 @@
 <script src="engine/game.js"></script>
 <script src="engine/assets.js"></script>
 <script src="engine/sprites.js"></script>
+<script src="engine/firebase-config.js"></script>
+<script src="engine/feedback.js"></script>
 
 <!-- games: manifest then game class, each registers with NDP -->
 <script src="games/gullet/manifest.js"></script>
@@ -98,9 +119,23 @@
 <script src="games/depths/game.js"></script>
 <script src="games/vaultbreaker/manifest.js"></script>
 <script src="games/vaultbreaker/game.js"></script>
-<script src="games/orbital/sprites.js"></script>
-<script src="games/orbital/manifest.js"></script>
-<script src="games/orbital/game.js?v=2"></script>
+<script src="games/orbital/sprites.js?v=3"></script>
+<script src="games/orbital/manifest.js?v=3"></script>
+<script src="games/orbital/lib/namespace.js?v=3"></script>
+<script src="games/orbital/lib/upgrades.js?v=3"></script>
+<script src="games/orbital/lib/xp.js?v=3"></script>
+<script src="games/orbital/lib/targeting.js?v=3"></script>
+<script src="games/orbital/lib/economy.js?v=3"></script>
+<script src="games/orbital/lib/persist.js?v=3"></script>
+<script src="games/orbital/lib/enemy-mods.js?v=3"></script>
+<script src="games/orbital/lib/overlay.js?v=3"></script>
+<script src="games/orbital/data/towers.js?v=3"></script>
+<script src="games/orbital/data/enemies.js?v=3"></script>
+<script src="games/orbital/data/rounds.js?v=3"></script>
+<script src="games/orbital/data/abilities.js?v=3"></script>
+<script src="games/orbital/ui/side-panel.js?v=3"></script>
+<script src="games/orbital/ui/recap.js?v=3"></script>
+<script src="games/orbital/game.js?v=3"></script>
 <script src="games/learntoheist/content.js?v=2"></script>
 <script src="games/learntoheist/world.js?v=2"></script>
 <script src="games/learntoheist/manifest.js?v=2"></script>
@@ -123,12 +158,12 @@
 <script src="games/sand/lib/ui-brief.js?v=2"></script>
 <script src="games/sand/manifest.js"></script>
 <script src="games/sand/game.js?v=2"></script>
-<script src="games/reactor/manifest.js?v=4"></script>
-<script src="games/reactor/modules.js?v=4"></script>
-<script src="games/reactor/events.js?v=4"></script>
-<script src="games/reactor/research.js?v=4"></script>
-<script src="games/reactor/campaign.js?v=4"></script>
-<script src="games/reactor/game.js?v=4"></script>
+<script src="games/reactor/manifest.js?v=6"></script>
+<script src="games/reactor/modules.js?v=6"></script>
+<script src="games/reactor/events.js?v=6"></script>
+<script src="games/reactor/research.js?v=6"></script>
+<script src="games/reactor/campaign.js?v=6"></script>
+<script src="games/reactor/game.js?v=6"></script>
 <script src="games/snake/sprites.js?v=2"></script>
 <script src="games/snake/manifest.js?v=2"></script>
 <script src="games/snake/game.js?v=2"></script>

@@ -192,8 +192,9 @@
       ctx.font = 'bold 16px ui-monospace, monospace';
       ctx.fillStyle = COLORS.cash;
       ctx.textAlign = 'right';
-      ctx.fillText(`${game.round}/${game.maxRound}`, x + w - 4, top + 2);
-      const act = O.Rounds && O.Rounds.actFor(game.round);
+      const shownRound = Math.max(1, game.round);
+      ctx.fillText(`${shownRound}/${game.maxRound}`, x + w - 4, top + 2);
+      const act = O.Rounds && O.Rounds.actFor(shownRound);
       if (act) {
         ctx.font = '10px ui-sans-serif, system-ui';
         ctx.fillStyle = act.color;
@@ -248,6 +249,9 @@
     },
 
     // ---- BUILD MODE: tower buy list ----
+    // Two-column compact grid. Each tile has icon on top + name/cost below.
+    // Locked towers stay visible but show a lock + "R<n>" requirement so the
+    // player can see what's coming, BTD4-style.
     _drawTowerList(ctx, game, yStart) {
       const xLeft = this.x + 8;
       const w = this.w - 16;
@@ -262,52 +266,138 @@
       ctx.textAlign = 'right';
       ctx.fillText('hotkeys 1-9, 0', xLeft + w - 4, yStart + 4);
 
-      const rowH = 46;
-      const startY = yStart + 22 - this.scroll;
+      const cols = 2;
+      const gap = 4;
+      const tileW = (w - gap * (cols - 1)) / cols;
+      const tileH = 56;
+      const rowH = tileH + gap;
+      const gridTop = yStart + 22;
+      const gridBottom = this.h - 4;
+      const visibleH = gridBottom - gridTop;
+      // Clamp scroll so we never scroll past the end of the grid
+      const totalRows = Math.ceil(keys.length / cols);
+      const totalH = totalRows * rowH;
+      const maxScroll = Math.max(0, totalH - visibleH);
+      if (this.scroll > maxScroll) this.scroll = maxScroll;
+      if (this.scroll < 0) this.scroll = 0;
+
+      // Clip to grid region so partially-visible tiles look clean
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xLeft, gridTop, w, visibleH);
+      ctx.clip();
+
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
         const def = O.Towers.get(key).base;
-        const y = startY + i * rowH;
-        if (y > this.h - 8 || y + rowH < yStart + 18) continue;
-        const r = { x: xLeft, y: y, w: w, h: rowH - 4 };
-        this._drawTowerRow(ctx, game, key, def, r, i + 1);
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = xLeft + col * (tileW + gap);
+        const y = gridTop + row * rowH - this.scroll;
+        if (y > this.h || y + tileH < gridTop) continue;
+        const r = { x, y, w: tileW, h: tileH };
+        this._drawTowerTile(ctx, game, key, def, r, i + 1);
         this.hits.push({ rect: r, kind: 'buyTower', key: key });
+      }
+      ctx.restore();
+
+      // Tiny scroll indicator on the right edge if content overflows
+      if (totalH > visibleH) {
+        const trackY = gridTop;
+        const trackH = visibleH;
+        const thumbH = Math.max(20, trackH * (visibleH / totalH));
+        const thumbY = trackY + (trackH - thumbH) * (this.scroll / maxScroll);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(xLeft + w - 2, trackY, 2, trackH);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillRect(xLeft + w - 2, thumbY, 2, thumbH);
       }
     },
 
-    _drawTowerRow(ctx, game, key, def, r, hotkey) {
+    _drawTowerTile(ctx, game, key, def, r, hotkey) {
       const isHover = this._inRect(game._mx, game._my, r);
       const isPicked = game.placeKey === key;
-      const canAfford = game.cash >= def.cost;
-      // Background
-      ctx.fillStyle = isPicked ? COLORS.panelHi2
-                                : (isHover ? COLORS.panelHi : '#0e1430');
+      const unlocked = game.isTowerUnlocked
+        ? game.isTowerUnlocked(key)
+        : O.Towers.isUnlocked(key, Math.max(game.round || 0, game.bestRound || 0));
+      const canAfford = unlocked && game.cash >= def.cost;
+      const unlockR = O.Towers.unlockRound(key);
+
+      // Background — locked is darker / lower contrast
+      let bg = '#0e1430';
+      if (!unlocked) bg = '#08091a';
+      else if (isPicked) bg = COLORS.panelHi2;
+      else if (isHover) bg = COLORS.panelHi;
+      ctx.fillStyle = bg;
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = isPicked ? def.color : COLORS.border;
+      ctx.strokeStyle = isPicked ? def.color
+                       : !unlocked ? COLORS.locked
+                       : (canAfford ? '#3a4880' : COLORS.border);
       ctx.lineWidth = isPicked ? 1.8 : 1;
       ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-      // Sprite icon
+
+      // Color band on the left edge — quick path-color glance
+      ctx.fillStyle = unlocked ? def.color : COLORS.locked;
+      ctx.globalAlpha = unlocked ? 0.85 : 0.4;
+      ctx.fillRect(r.x, r.y, 3, r.h);
+      ctx.globalAlpha = 1;
+
+      // Sprite icon (top half, centered)
+      const iconCX = r.x + r.w / 2;
+      const iconCY = r.y + 20;
+      ctx.save();
+      if (!unlocked) ctx.globalAlpha = 0.35;
       if (Assets) {
-        Assets.draw(ctx, def.sprite, r.x + 22, r.y + r.h / 2, 36, 36, {
+        Assets.draw(ctx, def.sprite, iconCX, iconCY, 32, 32, {
           fallback: () => {
             ctx.fillStyle = def.color;
-            ctx.fillRect(r.x + 6, r.y + 6, 30, 30);
+            ctx.fillRect(iconCX - 14, iconCY - 14, 28, 28);
           }
         });
       }
-      // Name + cost
-      ctx.fillStyle = canAfford ? COLORS.text : COLORS.textDim;
-      ctx.font = 'bold 12px ui-sans-serif, system-ui';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(def.short || def.name, r.x + 44, r.y + 6);
-      ctx.fillStyle = canAfford ? COLORS.cash : COLORS.life;
-      ctx.font = 'bold 13px ui-monospace, monospace';
-      ctx.fillText('$' + def.cost, r.x + 44, r.y + 22);
-      // Hotkey badge
+      ctx.restore();
+
+      // Hotkey badge — top-right corner
       ctx.fillStyle = COLORS.textDim;
       ctx.font = 'bold 9px ui-monospace, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(hotkey === 10 ? '0' : String(hotkey), r.x + r.w - 6, r.y + 6);
+      ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+      ctx.fillText(hotkey === 10 ? '0' : String(hotkey), r.x + r.w - 4, r.y + 3);
+
+      // Name (bottom-center)
+      ctx.fillStyle = unlocked ? (canAfford ? COLORS.text : COLORS.textDim) : COLORS.textDim;
+      ctx.font = 'bold 11px ui-sans-serif, system-ui';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText(def.short || def.name, r.x + r.w / 2, r.y + r.h - 16);
+
+      // Cost or unlock requirement
+      if (unlocked) {
+        ctx.fillStyle = canAfford ? COLORS.cash : COLORS.life;
+        ctx.font = 'bold 12px ui-monospace, monospace';
+        ctx.fillText('$' + def.cost, r.x + r.w / 2, r.y + r.h - 3);
+      } else {
+        ctx.fillStyle = COLORS.locked;
+        ctx.font = 'bold 11px ui-monospace, monospace';
+        ctx.fillText('R' + unlockR, r.x + r.w / 2, r.y + r.h - 3);
+      }
+
+      // Lock overlay
+      if (!unlocked) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+        // Padlock glyph
+        ctx.strokeStyle = COLORS.locked;
+        ctx.fillStyle = COLORS.locked;
+        ctx.lineWidth = 1.6;
+        const lx = iconCX, ly = iconCY;
+        ctx.beginPath();
+        ctx.arc(lx, ly - 3, 5, Math.PI, 0, false);
+        ctx.stroke();
+        ctx.fillRect(lx - 7, ly - 3, 14, 10);
+        ctx.fillStyle = '#08091a';
+        ctx.fillRect(lx - 0.8, ly + 1, 1.6, 4);
+        ctx.restore();
+      }
     },
 
     // ---- SELECTED MODE: tower stats + upgrade tree ----
@@ -567,7 +657,18 @@
         this._tooltip(ctx, game._mx, game._my, td.label, td.desc, '$' + fmtCash(td.cost));
       } else if (h.kind === 'buyTower') {
         const def = O.Towers.get(h.key).base;
-        this._tooltip(ctx, game._mx, game._my, def.name, def.desc || '', '$' + fmtCash(def.cost));
+        const unlocked = game.isTowerUnlocked
+          ? game.isTowerUnlocked(h.key)
+          : O.Towers.isUnlocked(h.key, Math.max(game.round || 0, game.bestRound || 0));
+        if (!unlocked) {
+          const ur = O.Towers.unlockRound(h.key);
+          this._tooltip(ctx, game._mx, game._my,
+            '🔒 ' + def.name,
+            (def.desc || '') + '  —  Locked: clear round ' + ur + ' to unlock.',
+            'UNLOCKS R' + ur);
+        } else {
+          this._tooltip(ctx, game._mx, game._my, def.name, def.desc || '', '$' + fmtCash(def.cost));
+        }
       } else if (h.kind === 'fireAbility') {
         const def = O.Abilities.get(h.abilityId);
         if (def) this._tooltip(ctx, game._mx, game._my, def.label, def.desc, 'CD ' + def.cd + 's');
@@ -575,8 +676,8 @@
     },
 
     _tooltip(ctx, mx, my, title, desc, footer) {
-      const W = 200;
-      const H = 70;
+      const W = 220;
+      const H = 86;
       let x = mx - W - 12;
       let y = my - H / 2;
       if (x < 4) x = 4;
@@ -627,13 +728,23 @@
         case 'speedToggle':
           game.toggleSpeed();
           return true;
-        case 'buyTower':
-          if (game.cash >= O.Towers.get(h.key).base.cost) {
+        case 'buyTower': {
+          const unlocked = game.isTowerUnlocked
+            ? game.isTowerUnlocked(h.key)
+            : O.Towers.isUnlocked(h.key, Math.max(game.round || 0, game.bestRound || 0));
+          if (!unlocked) {
+            const ur = O.Towers.unlockRound(h.key);
+            game.flashMessage('Locked — clear round ' + ur, '#ff5566');
+            game.sfx.play('lose');
+          } else if (game.cash >= O.Towers.get(h.key).base.cost) {
             game.placeKey = h.key;
             game.selectedTower = null;
             game.sfx.play('place');
+          } else {
+            game.flashMessage('Not enough cash', '#ff5566');
           }
           return true;
+        }
         case 'deselect':
           game.selectedTower = null;
           return true;

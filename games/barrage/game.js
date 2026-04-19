@@ -8,11 +8,16 @@
 
   const UPGRADES = [
     { id: 'radius',  label: 'Bigger Bursts',   desc: '+25 blast radius (stacks)', cost: 40, max: 3, color: '#ffd86b' },
+    { id: 'ammo',    label: 'Extra Magazines', desc: '+6 ammo per wave (stacks)', cost: 50, max: 3, color: '#ffaa55' },
+    { id: 'reload',  label: 'Faster Trigger',  desc: '-40% fire cooldown',        cost: 60, max: 1, color: '#ff7733' },
     { id: 'freeze',  label: 'Freeze Burst',    desc: 'Slows missiles in radius',  cost: 70, max: 1, color: '#88e8ff' },
     { id: 'chain',   label: 'Chain Burst',     desc: 'Kills spawn a mini-burst',  cost: 90, max: 1, color: '#ff4fd8' },
     { id: 'repair',  label: 'Repair City',     desc: 'Rebuild one fallen city',   cost: 55, max: 6, color: '#4fc8ff' },
     { id: 'extra',   label: '+1 Starting City',desc: 'Campaign starts with more', cost: 80, max: 2, color: '#66ff88' }
   ];
+
+  // Base fire cooldown (s) — prevents spam-click trivializing waves.
+  const FIRE_CD = 0.32;
 
   class BarrageGame extends BaseGame {
     init() {
@@ -33,7 +38,10 @@
       for (let i = 0; i < cityCount; i++) {
         this.cities.push({ x: 80 + i * 160, y: GROUND_Y, alive: true, rubble: 0 });
       }
-      this.coinsHeld = 0;
+      // Per-game persistent wallet — coins carry between barrage runs.
+      this.coinsHeld = Storage.getGameWallet('barrage');
+      this.wavesClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.phase = 'intro';  // 'intro' | 'wave' | 'intermission' | 'victory'
       this.phaseT = 2.0;
       this.spawnTimer = 0;
@@ -64,6 +72,9 @@
 
     _upgLevel(id) { return (this.upg[id] || 0); }
     _burstRadius() { return 56 + this._upgLevel('radius') * 20; }
+    _fireCooldown() { return FIRE_CD * (this._upgLevel('reload') ? 0.6 : 1); }
+    // Ammo per wave: tight enough that you must aim for clusters, not spam.
+    _waveAmmo(n) { return 10 + n * 2 + this._upgLevel('ammo') * 6; }
 
     _startWave(n) {
       this.wave = n;
@@ -73,6 +84,9 @@
       this.missilesToSpawn = 8 + n * 3;
       this.missilesSpawned = 0;
       this.spawnTimer = 0.7;
+      this.ammo = this._waveAmmo(n);
+      this.ammoMax = this.ammo;
+      this.fireCd = 0;
     }
 
     update(dt) {
@@ -195,19 +209,32 @@
         if (this.comboTimer <= 0) this.combo = 0;
       }
 
-      // Click → flak burst
+      if (this.fireCd > 0) this.fireCd -= dt;
+
+      // Click → flak burst (limited by ammo + fire cooldown)
       if (Input.mouse.justPressed && Input.mouse.y < GROUND_Y - 10) {
-        const freezeReady = this._upgLevel('freeze') && (Input.keys['Shift'] || Input.keys[' ']);
-        this.bursts.push({
-          x: Input.mouse.x, y: Input.mouse.y,
-          r: 0, maxR: this._burstRadius(), age: 0,
-          lifeUp: 0.26, life: 0.6, checked: false,
-          freeze: !!freezeReady
-        });
-        this.sfx.play('fire');
-        this.sfx.play('burst');
-        this.shake(3, 0.1);
+        if (this.ammo <= 0) {
+          this.sfx.play('fire', { freq: 120, vol: 0.15 });
+          this._dryFireFlash = 0.3;
+        } else if (this.fireCd > 0) {
+          // throttled — small audio tick, no burst
+          this.sfx.play('fire', { freq: 200, vol: 0.12 });
+        } else {
+          const freezeReady = this._upgLevel('freeze') && (Input.keys['Shift'] || Input.keys[' ']);
+          this.bursts.push({
+            x: Input.mouse.x, y: Input.mouse.y,
+            r: 0, maxR: this._burstRadius(), age: 0,
+            lifeUp: 0.26, life: 0.6, checked: false,
+            freeze: !!freezeReady
+          });
+          this.ammo--;
+          this.fireCd = this._fireCooldown();
+          this.sfx.play('fire');
+          this.sfx.play('burst');
+          this.shake(3, 0.1);
+        }
       }
+      if (this._dryFireFlash > 0) this._dryFireFlash -= dt;
 
       // Wave done? all spawned and no live missiles
       const alive = this.missiles.filter(m => !m.dead).length;
@@ -216,10 +243,13 @@
         const cities = this.cities.filter(c => c.alive).length;
         const wavePay = 25 + this.wave * 10 + cities * 6;
         this.coinsHeld += wavePay;
+        this.wavesClearedThisRun++;
+        Storage.setGameWallet('barrage', this.coinsHeld);
         this.addScore(500 + this.wave * 50);
         this.sfx.play('wave');
         this.flash('#4fc8ff', 0.15);
         if (this.wave >= this.maxWave) {
+          this.victoryAchieved = true;
           this.phase = 'victory';
           this._writeSave(true);
           setTimeout(() => this.win(), 1200);
@@ -229,6 +259,7 @@
       }
 
       if (this.cities.every(c => !c.alive)) {
+        Storage.setGameWallet('barrage', this.coinsHeld);
         this._writeSave(false);
         this.gameOver();
         return;
@@ -299,7 +330,7 @@
     _buy(u) {
       const lvl = this._upgLevel(u.id);
       if (lvl >= u.max) return;
-      if (this.coinsHeld < u.cost) return;
+      if (!Storage.spendGameWallet('barrage', u.cost)) return;
       this.coinsHeld -= u.cost;
       this.upg[u.id] = lvl + 1;
       this.sfx.play('buy');
@@ -314,8 +345,10 @@
 
     _hud() {
       const cities = this.cities.filter(c => c.alive).length;
+      const ammoColor = this.ammo <= 3 ? '#ff6e3a' : this.ammo <= this.ammoMax * 0.4 ? '#ffd86b' : '#caffd5';
       return `<span>Wave <b>${this.wave}/${this.maxWave}</b></span>` +
              `<span>Cities <b>${cities}/${this.cities.length}</b></span>` +
+             `<span>Ammo <b style="color:${ammoColor}">${this.ammo}/${this.ammoMax}</b></span>` +
              `<span>Combo <b>x${this.combo}</b></span>` +
              `<span>&#9679; <b>${this.coinsHeld}</b></span>`;
     }
@@ -419,15 +452,38 @@
 
       const mx = Input.mouse.x, my = Input.mouse.y;
       if (my < GROUND_Y - 10 && this.phase === 'wave') {
-        ctx.strokeStyle = '#ffd86b'; ctx.lineWidth = 1;
+        const empty = this.ammo <= 0;
+        const cd = this.fireCd > 0;
+        const xColor = empty ? '#ff3355' : cd ? '#776655' : '#ffd86b';
+        ctx.strokeStyle = xColor; ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(mx - 10, my); ctx.lineTo(mx + 10, my);
         ctx.moveTo(mx, my - 10); ctx.lineTo(mx, my + 10);
         ctx.stroke();
         ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = '#ffd86b60';
+        ctx.strokeStyle = empty ? '#ff335560' : cd ? '#77665560' : '#ffd86b60';
         ctx.beginPath(); ctx.arc(mx, my, this._burstRadius(), 0, Math.PI * 2); ctx.stroke();
         ctx.setLineDash([]);
+        // cooldown ring
+        if (cd) {
+          const frac = 1 - this.fireCd / this._fireCooldown();
+          ctx.strokeStyle = '#ffd86b';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(mx, my, 14, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+          ctx.stroke();
+        }
+        if (empty) {
+          ctx.fillStyle = '#ff3355';
+          ctx.font = 'bold 11px ui-monospace, monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('NO AMMO', mx, my - 22);
+        }
+      }
+      // brief screen-edge red pulse when dry-firing
+      if (this._dryFireFlash > 0) {
+        ctx.fillStyle = `rgba(255,51,85,${0.25 * this._dryFireFlash})`;
+        ctx.fillRect(0, 0, W, H);
       }
 
       // Wave progress bar
@@ -543,7 +599,12 @@
       ctx.fillText('SKIES SECURED', W / 2, H / 2);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 300)); }
+    coinsEarned(/* score */) {
+      // Theme-shop coins from wave milestones, not from in-run kills.
+      const waves = this.wavesClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return waves * 3 + winBonus;
+    }
   }
 
   NDP.attachGame('barrage', BarrageGame);

@@ -1,11 +1,17 @@
 /* Starfall — vertical scrolling shmup.
    Wave-based. Every 10th wave is a boss. Collect green orbs for rapid-fire,
-   pink orbs for triple-shot. 3 lives. */
+   pink orbs for triple-shot. 3 lives.
+
+   Currency model: per-game wallet ('Stardust') under Storage.*GameWallet
+   ('starfall'). Pre-run shop spends Stardust only; never global theme coins.
+   Stardust is awarded at end-of-run from wave milestones (same formula as
+   theme coinsEarned). NG+/persistent. */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Assets, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
+  const GID = 'starfall';
 
   const UPGRADES = [
     { id: 'life',  label: '+Extra Life',   desc: '+1 starting life per tier',  cost: 120, max: 2, color: '#ff4466' },
@@ -49,6 +55,8 @@
       this.waveSpawnCd = 0;
       this.boss = null;
       this.flashCol = null;
+      this.wavesClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.sfx = this.makeSfx({
         shoot: { freq: 880, type: 'square', dur: 0.06, slide: -320, vol: 0.12 },
         boom:  { freq: 120, type: 'noise', dur: 0.18, vol: 0.35, filter: 'lowpass' },
@@ -90,9 +98,9 @@
       ctx.fillStyle = '#a58abd';
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('boss every 10 waves, phase-2 at 50%. best: wave ' + this.save.bestWave, W / 2, 96);
-      ctx.fillStyle = '#ffcc33';
+      ctx.fillStyle = '#ffec7a';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Stardust: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -101,7 +109,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -293,6 +301,7 @@
             this.waveSpawnCd = Math.max(0.3, 0.8 - this.wave * 0.02);
           }
         } else if (this.enemies.length === 0 && this.waveTimer <= 0) {
+          this.wavesClearedThisRun++;
           this.wave++;
           this.spawnWave();
           this.waveTimer = 2.0;
@@ -418,8 +427,14 @@
       this.sparks2(p.x, p.y, 22, '#f66');
       if (p.lives <= 0) {
         Storage.setGameData('starfall', { bestWave: Math.max(this.save.bestWave, this.wave), upgrades: this.save.upgrades });
+        this._awardWallet();
         this.gameOver();
       }
+    }
+
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
     }
 
     _detonateBomb() {
@@ -449,16 +464,14 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('starfall', { bestWave: this.save.bestWave, upgrades: this.save.upgrades });
-                  this.sfx.play('buy');
-                  this.player.lives = 3 + this.save.upgrades.life;
-                  this.bombs = this.save.upgrades.bomb;
-                  this.triple = this.save.upgrades.tri ? 5 : 0;
-                  this.rapid = this.save.upgrades.rap ? 5 : 0;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('starfall', { bestWave: this.save.bestWave, upgrades: this.save.upgrades });
+                this.sfx.play('buy');
+                this.player.lives = 3 + this.save.upgrades.life;
+                this.bombs = this.save.upgrades.bomb;
+                this.triple = this.save.upgrades.tri ? 5 : 0;
+                this.rapid = this.save.upgrades.rap ? 5 : 0;
               }
               return;
             }
@@ -617,7 +630,11 @@
       }})) {}
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 80)); }
+    coinsEarned() {
+      const cleared = this.wavesClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return cleared * 2 + winBonus;
+    }
   }
 
   NDP.attachGame('starfall', StarfallGame);

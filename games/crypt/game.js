@@ -26,6 +26,11 @@
       this.shopRects = [];
 
       this.floor = 1;
+      // Milestone counters used by coinsEarned() — global theme-shop coins are
+      // awarded for floors cleared this run and a victory bonus, never from
+      // in-run loot pickups (which inflate score).
+      this.floorsClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.maxHp = 5 + this.save.upgrades.hp * 2;
       this.hp = this.maxHp;
       this.potions = this.save.upgrades.potion; // inventory
@@ -310,6 +315,8 @@
               // Boss death check
               if (e.kind === 'boss') {
                 this.phase = 'victory';
+                this.floorsClearedThisRun++;
+                this.victoryAchieved = true;
                 this._writeSave();
                 this.flash('#fff', 0.6);
                 this.shake(20, 0.8);
@@ -425,6 +432,7 @@
         const d = Math.hypot(h.x - this.stairs.x, h.y - this.stairs.y);
         if (d < 24) {
           this.floor++;
+          this.floorsClearedThisRun++;
           this.addScore(50 + this.floor * 5);
           this._writeSave();
           this.sfx.play('descend');
@@ -459,8 +467,8 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
+              if (lvl < u.max && Storage.getGameWallet('crypt') >= u.cost) {
+                if (Storage.spendGameWallet('crypt', u.cost)) {
                   this.save.upgrades[u.id] = lvl + 1;
                   Storage.setGameData('crypt', { bestFloor: this.save.bestFloor, upgrades: this.save.upgrades });
                   this.sfx.play('buy');
@@ -756,7 +764,7 @@
       ctx.fillText('8 floors. boss at floor 8. best: floor ' + this.save.bestFloor, W / 2, 96);
       ctx.fillStyle = '#ffcc33';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Crypt coins: \u25CF ' + Storage.getGameWallet('crypt'), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -765,7 +773,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet('crypt') >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -800,7 +808,20 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 75)); }
+    // End-of-run: fund the per-game wallet from raw score (the in-game shop
+    // economy). The pre-shop chest/kill loot is what flows here, NOT into
+    // global theme coins — those are the milestone-based coinsEarned() bucket.
+    onEnd(score) {
+      const purse = Math.max(0, Math.floor(score / 75));
+      if (purse > 0) Storage.addGameWallet('crypt', purse);
+    }
+
+    // Global theme-shop coins are milestone-based: floors cleared this run
+    // plus a victory bonus when the floor-8 boss falls. In-run loot is the
+    // domain of the per-game wallet (see onEnd above).
+    coinsEarned(/*score*/) {
+      return (this.floorsClearedThisRun | 0) * 2 + (this.victoryAchieved ? 20 : 0);
+    }
   }
 
   NDP.attachGame('crypt', CryptGame);

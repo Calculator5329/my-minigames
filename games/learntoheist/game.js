@@ -32,6 +32,15 @@
       this.phase = 'workshop';       // workshop | aim | power | flight | report | shop
       this.prevPhase = null;
 
+      // Milestone counters for the per-game-wallet pattern. `coinsEarned()`
+      // reads these to decide how many *theme* coins to award when the engine
+      // ends the run; they intentionally never touch `this.save.coins` (the
+      // per-game wallet) so the global theme economy stays decoupled from
+      // run-internal pickups.
+      this.victoryAchieved = false;
+      this.goalsCompletedThisRun = 0;
+      this._endTriggered = false;
+
       // Run-scoped state
       this.cam = { x: 0, y: 0 };
       this.player = this._newPlayer();
@@ -157,6 +166,7 @@
           this.save.goalsDone.push(g.id);
           this.save.coins += g.reward;
           this.run.completedGoals.push(g);
+          this.goalsCompletedThisRun++;
         }
       }
 
@@ -168,6 +178,23 @@
       LTH.writeSave(this.save);
       this.sfx.play('crash');
       this.shake(10, 0.4);
+
+      // Mark the engine-level outcome here, but defer the actual `win()`/
+      // `gameOver()` call until the player dismisses the in-game report
+      // (see `_updateReport`). That way the player still sees their goals
+      // and rewards before main.js draws the global "+N coins" overlay.
+      // NG+/persistent: we never wipe save data here — wallet, tiers, and
+      // goalsDone all carry over to the next run.
+      if (this.run.bossPunched) this.victoryAchieved = true;
+    }
+
+    // Theme coins are awarded per *milestone*, never per-pickup. Goals cleared
+    // this run is the most natural progress signal; victory bumps it to the
+    // 25-50 calibration band described in the migration plan.
+    coinsEarned() {
+      const goals = this.goalsCompletedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return goals * 5 + winBonus;
     }
 
     _goalProgress(g) {
@@ -706,8 +733,17 @@
     _updateReport(dt) {
       const k = Input.keys;
       if (Input.mouse.justPressed || k['Enter'] || k['r'] || k['R']) {
-        this._reset();
         k['Enter'] = false; k['r'] = false; k['R'] = false;
+        // Order matters: trigger the engine state transition FIRST so that
+        // `coinsEarned()` can still read this run's milestone counters, then
+        // wipe per-run state so a "Play Again" from the engine overlay drops
+        // the player back into the workshop with a clean slate.
+        if (!this._endTriggered) {
+          this._endTriggered = true;
+          if (this.victoryAchieved) this.win();
+          else this.gameOver();
+        }
+        this._reset();
       }
       if (k['s'] || k['S']) {
         this.prevPhase = 'report'; this.phase = 'shop';
@@ -737,6 +773,10 @@
       this.modifier = this._pickModifier();
       this._applyStats();
       this.phase = 'workshop';
+      // reset milestone counters for the next run's `coinsEarned()`
+      this.goalsCompletedThisRun = 0;
+      this.victoryAchieved = false;
+      this._endTriggered = false;
     }
 
     _updateShop(dt) {

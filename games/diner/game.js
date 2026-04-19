@@ -92,6 +92,11 @@
       this.feedback = null;
       this.shopRects = [];
 
+      // Milestone counters for theme-coin payout, and per-game wallet
+      // (tips deposited at day-end → spent in kitchen shop).
+      this.daysCompletedThisRun = 0;
+      this.victoryAchieved = false;
+
       // Build slot grid up-front; visible slots filtered by day's tier.
       const slotW = 90, slotH = 70;
       const startX = 40, startY = 360;
@@ -400,8 +405,12 @@
         this.save.bestDay = Math.max(this.save.bestDay, this.dayIx + 1);
         this.save.totalTips += this.dayTips;
         saveData(this.save);
+        // Bank today's tips into the per-game wallet (spendable at shop).
+        Storage.addGameWallet('diner', this.dayTips | 0);
+        this.daysCompletedThisRun++;
         // Last day → victory
         if (this.dayIx + 1 >= DAYS.length) {
+          this.victoryAchieved = true;
           this.phase = 'victory';
           this.victoryTimer = 0;
           this.sfx.play('win');
@@ -428,10 +437,7 @@
             const st = r.station;
             const owned = this.save.stations[st.id];
             if (owned) return;
-            const coins = NDP.Engine.Storage.coins || 0;
-            if (coins < st.cost) return;
-            NDP.Engine.Storage.coins = coins - st.cost;
-            NDP.Engine.Storage.save();
+            if (!Storage.spendGameWallet('diner', st.cost)) return;
             this.save.stations[st.id] = true;
             saveData(this.save);
             this.sfx.play('buy');
@@ -677,9 +683,9 @@
       ctx.fillText('KITCHEN SHOP', cx, 80);
       ctx.shadowBlur = 0;
 
-      const coins = NDP.Engine.Storage.coins || 0;
+      const coins = Storage.getGameWallet('diner');
       ctx.fillStyle = '#ffd86b'; ctx.font = '16px ui-monospace, monospace';
-      ctx.fillText('● ' + coins + ' coins', cx, 116);
+      ctx.fillText('● $' + coins + ' tips banked', cx, 116);
 
       this.shopRects = [];
       const cardW = 200, cardH = 220, gap = 18;
@@ -743,7 +749,12 @@
       ctx.fillText('Click to finish run', cx, 380);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 80)); }
+    coinsEarned(/* score */) {
+      // Theme-shop coins from days completed, not from raw tip score.
+      const days = this.daysCompletedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return days * 5 + winBonus;
+    }
   }
 
   function ptInRect(x, y, r) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }

@@ -1,14 +1,20 @@
 /* Skybound — climb through altitude biomes. Hazards vary by zone.
-   Permanent upgrades purchased pre-run via the global coin pool. */
+
+   Currency model: per-game wallet ('Updrafts') under Storage.*GameWallet
+   ('skybound'). Pre-run shop spends Updrafts only. Wallet awarded at
+   end-of-run from altitude income, biome milestones, and victory bonus
+   on reaching 2500m. Each biome cleared mid-run grants a permanent
+   in-run buff (full fuel, +1 shield, +6% thrust). NG+/persistent. */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
-  const GRAV = 720;
-  const BASE_THRUST = 1500;
-  const MAX_FALL = 720;
-  const CAMERA_DEATH_OFFSET = 60;
+  const GRAV = 620;
+  const GID = 'skybound';
+  const BASE_THRUST = 1420;
+  const MAX_FALL = 580;
+  const CAMERA_DEATH_OFFSET = 80;
 
   const BIOMES = [
     { from: 0,    to: 600,  name: 'MEADOW',       topCol: '#ffcfa0', botCol: '#7fbddd', hazards: ['bird'] },
@@ -17,11 +23,14 @@
     { from: 1800, to: 2500, name: 'VOID',         topCol: '#08082a', botCol: '#050518', hazards: ['debris','debris'] }
   ];
 
+  // Per-tier costs scale linearly so early tiers are cheap, late tiers grindy.
   const UPGRADES = [
-    { id: 'tank',   label: 'Larger Fuel Tank', desc: '+20% burn time per tier', cost: 120, max: 3, color: '#ffd86b' },
-    { id: 'boost',  label: 'Tuned Thrusters',  desc: '+8% thrust per tier',     cost: 160, max: 3, color: '#4fc8ff' },
-    { id: 'shield', label: 'Start Shield',     desc: 'Begin with 1 shield',     cost: 180, max: 1, color: '#88e8ff' },
-    { id: 'dj',     label: 'Pulse Jump',       desc: 'SHIFT: one free boost',   cost: 220, max: 1, color: '#ff4fd8' }
+    { id: 'tank',   label: 'Larger Fuel Tank', desc: '+20% burn time per tier',         cost: 90,  max: 5, color: '#ffd86b' },
+    { id: 'boost',  label: 'Tuned Thrusters',  desc: '+8% thrust per tier',             cost: 120, max: 5, color: '#4fc8ff' },
+    { id: 'shield', label: 'Start Shield',     desc: '+1 starting shield per tier',     cost: 140, max: 3, color: '#88e8ff' },
+    { id: 'dj',     label: 'Pulse Jumps',      desc: 'SHIFT: +1 free boost per tier',   cost: 170, max: 3, color: '#ff4fd8' },
+    { id: 'glide',  label: 'Glider Wings',     desc: '-10% gravity while falling',      cost: 200, max: 2, color: '#caffd5' },
+    { id: 'start',  label: 'Head Start',       desc: '+200m starting altitude per tier',cost: 110, max: 3, color: '#ffa37a' }
   ];
 
   class SkyboundGame extends BaseGame {
@@ -29,24 +38,33 @@
       const d = Storage.getGameData('skybound') || {};
       this.save = {
         bestAltitude: d.bestAltitude || 0,
-        upgrades:     Object.assign({ tank:0, boost:0, shield:0, dj:0 }, d.upgrades || {})
+        upgrades:     Object.assign({ tank:0, boost:0, shield:0, dj:0, glide:0, start:0 }, d.upgrades || {})
       };
 
       this.phase = 'shop';  // 'shop' | 'flight' | 'victory'
       this.shopRects = [];
       this.launchedT = 0;
 
-      this.player = { x: W / 2, y: 0, vx: 0, vy: 0, r: 14 };
-      this.fuelMax = 1.0 + this.save.upgrades.tank * 0.2;
+      // Head Start gives a launch altitude (in meters; 1m = 10 world px).
+      const startAltitude = this.save.upgrades.start * 200;
+      const startY = -startAltitude * 10;
+
+      this.player = { x: W / 2, y: startY, vx: 0, vy: 0, r: 14 };
+      this.fuelMax = 1.25 + this.save.upgrades.tank * 0.2;
       this.fuel = this.fuelMax;
       this.shields = this.save.upgrades.shield;
-      this.djReady = !!this.save.upgrades.dj;
+      this.djCharges = this.save.upgrades.dj;
+      this.djMax = this.save.upgrades.dj;
+      this._shiftHeld = false;
+      this.runThrustMul = 1.0;
+      this.lastMilestone = 0;
+      this.banner = null;
       this.slowmoT = 0;
-      this.cameraY = -H * 0.4;
+      this.cameraY = startY - H * 0.4;
       this.cameraCreep = 0;
       this.worldObjects = [];
-      this.nextSpawnY = -40;
-      this.highestY = 0;
+      this.nextSpawnY = startY - 40;
+      this.highestY = startY;
 
       this.sfx = this.makeSfx({
         thrust: { freq: 140, type: 'sawtooth', dur: 0.04, vol: 0.18 },
@@ -58,10 +76,12 @@
         biome:  { freq: 660, type: 'triangle', dur: 0.3,  slide: 220, vol: 0.5 }
       });
       this.trailTimer = 0;
-      this.currentBiome = 0;
+      this.currentBiome = this._biomeFor(startAltitude);
+      this.biomesClearedThisRun = 0;
+      this.victoryAchieved = false;
 
       for (let i = 0; i < 4; i++) {
-        this.worldObjects.push({ type: 'cloud', x: 120 + i * 180, y: 80 + (i%2)*40, r: 30 });
+        this.worldObjects.push({ type: 'cloud', x: 120 + i * 180, y: startY + 80 + (i%2)*40, r: 30 });
       }
       this.setHud(this._hud());
     }
@@ -98,10 +118,12 @@
       p.vx *= Math.pow(0.01, dt);
       p.vx = Math.max(-520, Math.min(520, p.vx));
 
-      const thrustStrength = BASE_THRUST * (1 + this.save.upgrades.boost * 0.08);
+      const thrustStrength = BASE_THRUST *
+        (1 + this.save.upgrades.boost * 0.08) *
+        this.runThrustMul;
       if (thrust && this.fuel > 0) {
         p.vy -= thrustStrength * dt;
-        this.fuel = Math.max(0, this.fuel - dt * 0.28);
+        this.fuel = Math.max(0, this.fuel - dt * 0.22);
         this.trailTimer += dt;
         if (this.trailTimer > 0.03) {
           this.trailTimer = 0;
@@ -115,15 +137,21 @@
           if (Math.random() < 0.2) this.sfx.play('thrust');
         }
       }
-      // Pulse jump (DJ)
-      if (shift && this.djReady) {
-        this.djReady = false;
+      // Pulse jump — multi-charge, fires once per SHIFT press.
+      const shiftEdge = shift && !this._shiftHeld;
+      this._shiftHeld = !!shift;
+      if (shiftEdge && this.djCharges > 0) {
+        this.djCharges--;
         p.vy = -900;
         this.sfx.play('boost');
         this.particles.burst(p.x, p.y, 22, { color: '#ff4fd8', speed: 260, life: 0.5 });
       }
 
-      p.vy += GRAV * dt;
+      // Glider reduces gravity while falling, full gravity while climbing.
+      const grav = (p.vy > 0)
+        ? GRAV * (1 - this.save.upgrades.glide * 0.10)
+        : GRAV;
+      p.vy += grav * dt;
       p.vy = Math.min(MAX_FALL, p.vy);
       p.x += p.vx * dt;
       p.y += p.vy * dt;
@@ -134,12 +162,41 @@
       const altitude = Math.abs(this.highestY);
       const bIdx = this._biomeFor(altitude);
       if (bIdx !== this.currentBiome) {
+        if (bIdx > this.currentBiome) {
+          const cleared = bIdx - this.currentBiome;
+          this.biomesClearedThisRun += cleared;
+          // Mid-run progression: each new biome refills fuel, grants a shield,
+          // a permanent +6% thrust bonus, and a small Updraft popup.
+          for (let k = 0; k < cleared; k++) {
+            this.fuel = this.fuelMax;
+            this.shields++;
+            this.runThrustMul += 0.06;
+          }
+          this.banner = {
+            text: BIOMES[bIdx].name + ' REACHED  +FUEL +SHIELD +THRUST',
+            color: BIOMES[bIdx].topCol,
+            t: 2.4
+          };
+        }
         this.currentBiome = bIdx;
         this.sfx.play('biome');
         this.flash(BIOMES[bIdx].topCol, 0.2);
       }
 
-      const creepRate = 20 + Math.min(70, altitude * 0.03);
+      // Milestone tick: every 100m grants +1 Updraft and a tiny ping.
+      const meters = Math.floor(altitude / 10);
+      const milestone = Math.floor(meters / 100);
+      if (milestone > this.lastMilestone) {
+        this.lastMilestone = milestone;
+        this.sfx.play('pickup', { freq: 1320, vol: 0.18 });
+      }
+
+      if (this.banner) {
+        this.banner.t -= dt;
+        if (this.banner.t <= 0) this.banner = null;
+      }
+
+      const creepRate = 14 + Math.min(58, altitude * 0.025);
       this.cameraCreep += creepRate * dt;
       this.cameraY = this.cameraY - this.cameraCreep;
       this.cameraCreep = 0;
@@ -224,7 +281,11 @@
       // Victory: reach 2500m
       if (altitude >= 2500) {
         this.phase = 'victory';
+        this.victoryAchieved = true;
+        // Cleared the final biome by reaching 2500m too.
+        if (this.currentBiome >= BIOMES.length - 1) this.biomesClearedThisRun++;
         this._writeSave(true);
+        this._awardWallet();
         this.flash('#ff4fd8', 0.5);
         this.sfx.play('boost', { freq: 1000 });
         setTimeout(() => this.win(), 1500);
@@ -280,7 +341,13 @@
       this.flash('#f87171', 0.22);
       this.particles.burst(this.player.x, this.player.y, 30, { color: '#f87171', speed: 280, life: 0.8 });
       this._writeSave(false);
+      this._awardWallet();
       this.gameOver();
+    }
+
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
     }
 
     // -------- SHOP --------
@@ -290,26 +357,49 @@
           if (Input.mouse.x >= r.x && Input.mouse.x <= r.x + r.w &&
               Input.mouse.y >= r.y && Input.mouse.y <= r.y + r.h) {
             if (r.kind === 'launch') {
+              // Re-seed run-state so any upgrades bought this visit (esp.
+              // Head Start, Pulse Jumps, Glider) take effect immediately.
+              const startAltitude = this.save.upgrades.start * 200;
+              const startY = -startAltitude * 10;
+              this.player.x = W / 2;
+              this.player.y = startY;
+              this.player.vx = 0;
+              this.player.vy = 0;
+              this.fuelMax = 1.25 + this.save.upgrades.tank * 0.2;
+              this.fuel = this.fuelMax;
+              this.shields = this.save.upgrades.shield;
+              this.djCharges = this.save.upgrades.dj;
+              this.djMax = this.save.upgrades.dj;
+              this.runThrustMul = 1.0;
+              this.lastMilestone = 0;
+              this.banner = null;
+              this.cameraY = startY - H * 0.4;
+              this.cameraCreep = 0;
+              this.worldObjects = [];
+              this.nextSpawnY = startY - 40;
+              this.highestY = startY;
+              this.currentBiome = this._biomeFor(startAltitude);
+              for (let i = 0; i < 4; i++) {
+                this.worldObjects.push({ type: 'cloud', x: 120 + i * 180, y: startY + 80 + (i%2)*40, r: 30 });
+              }
               this.phase = 'flight';
               return;
             }
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('skybound', {
-                    bestAltitude: this.save.bestAltitude,
-                    upgrades: this.save.upgrades
-                  });
-                  this.sfx.play('buy');
-                  // reapply live stats
-                  this.fuelMax = 1.0 + this.save.upgrades.tank * 0.2;
-                  this.fuel = this.fuelMax;
-                  this.shields = this.save.upgrades.shield;
-                  this.djReady = !!this.save.upgrades.dj;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('skybound', {
+                  bestAltitude: this.save.bestAltitude,
+                  upgrades: this.save.upgrades
+                });
+                this.sfx.play('buy');
+                this.fuelMax = 1.25 + this.save.upgrades.tank * 0.2;
+                this.fuel = this.fuelMax;
+                this.shields = this.save.upgrades.shield;
+                this.djCharges = this.save.upgrades.dj;
+                this.djMax = this.save.upgrades.dj;
               }
               return;
             }
@@ -322,12 +412,16 @@
       if (this.phase === 'shop') return '<span>Pre-flight shop</span>';
       const b = BIOMES[this.currentBiome].name;
       const sh = this.shields > 0 ? ' <b style="color:#88e8ff">S' + this.shields + '</b>' : '';
-      const dj = this.djReady ? ' <b style="color:#ff4fd8">DJ</b>' : '';
+      const dj = this.djCharges > 0
+        ? ' <b style="color:#ff4fd8">DJ' + this.djCharges + '</b>' : '';
+      const tm = this.runThrustMul > 1.0
+        ? ' <b style="color:#ffd86b">+' + Math.round((this.runThrustMul - 1) * 100) + '% T</b>' : '';
       return `<span>Height <b>${this.score}m</b></span>` +
              `<span>Zone <b>${b}</b></span>` +
              `<span>Fuel <b>${Math.round(this.fuel / this.fuelMax * 100)}%</b></span>` +
              (sh ? '<span>' + sh + '</span>' : '') +
-             (dj ? '<span>' + dj + '</span>' : '');
+             (dj ? '<span>' + dj + '</span>' : '') +
+             (tm ? '<span>' + tm + '</span>' : '');
     }
 
     render(ctx) {
@@ -552,19 +646,19 @@
       ctx.fillText('reach 2500m through 4 biomes. best: ' + this.save.bestAltitude + 'm', W / 2, 96);
       ctx.fillStyle = '#ffd86b';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins (from all games)', W / 2, 124);
+      ctx.fillText('Updrafts: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
-      const startX = 120, startY = 170;
-      const cellW = (W - 240 - 20) / 2, cellH = 76;
+      const startX = 120, startY = 156;
+      const cellW = (W - 240 - 20) / 2, cellH = 68;
       for (let i = 0; i < UPGRADES.length; i++) {
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
-        const ry = startY + row * (cellH + 16);
+        const ry = startY + row * (cellH + 12);
         ctx.fillStyle = maxed ? '#0a1a10' : canAfford ? '#1a140a' : '#140a1a';
         ctx.fillRect(rx, ry, cellW, cellH);
         ctx.strokeStyle = u.color; ctx.lineWidth = 1;
@@ -572,14 +666,14 @@
         ctx.fillStyle = u.color;
         ctx.font = 'bold 16px ui-monospace, monospace';
         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.fillText(u.label + (u.max > 1 ? ' (' + lvl + '/' + u.max + ')' : ''), rx + 14, ry + 12);
+        ctx.fillText(u.label + (u.max > 1 ? ' (' + lvl + '/' + u.max + ')' : ''), rx + 14, ry + 10);
         ctx.fillStyle = '#a58abd';
         ctx.font = '12px ui-monospace, monospace';
-        ctx.fillText(u.desc, rx + 14, ry + 36);
+        ctx.fillText(u.desc, rx + 14, ry + 32);
         ctx.fillStyle = maxed ? '#66ff88' : canAfford ? '#ffcc33' : '#776655';
         ctx.font = 'bold 14px ui-monospace, monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(maxed ? 'OWNED' : '\u25CF ' + u.cost, rx + cellW - 14, ry + 52);
+        ctx.fillText(maxed ? 'OWNED' : '\u25CF ' + u.cost, rx + cellW - 14, ry + cellH - 18);
         if (!maxed) this.shopRects.push({ x: rx, y: ry, w: cellW, h: cellH, kind: 'buy', i });
       }
 
@@ -596,7 +690,16 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 25)); }
+    coinsEarned() {
+      const altitude = Math.abs(this.highestY);
+      const altUpdrafts = Math.floor(altitude / 50);
+      const biomeBonus = (this.biomesClearedThisRun | 0) * 8;
+      const victory = this.victoryAchieved ? 30 : 0;
+      // bonusUpdrafts already accumulates milestone+biome popups awarded mid-run.
+      // Use altUpdrafts as the floor — it's the comprehensive base income — and
+      // add the biome/victory toppers once at end-of-run.
+      return altUpdrafts + biomeBonus + victory;
+    }
   }
 
   function lerpColor(a, b, t) {

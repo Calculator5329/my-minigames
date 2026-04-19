@@ -120,15 +120,62 @@
   ];
 
   /* ==================== PERSISTENCE ==================== */
-  const LS_KEY = 'bulwark_v1';
-  function loadMeta() {
+  // Per-game wallet pattern (see docs/plans/2026-04-19-currency-migration.md):
+  //   - `ash` (the meta currency) lives in `Storage.*GameWallet('bulwark')`;
+  //     every spend goes through `spendGameWallet` so it can never overdraw,
+  //     and shop UIs read the wallet directly.
+  //   - `unlocks` and `lastRun` (run-resume snapshot) live in
+  //     `Storage.setGameData('bulwark', {...})`.
+  //   - `OLD_LS_KEY` is the pre-migration `localStorage` blob; `migrateLegacy`
+  //     hoists it forward exactly once per device.
+  const GAME_ID = 'bulwark';
+  const OLD_LS_KEY = 'bulwark_v1';
+  const Storage = (typeof NDP !== 'undefined' && NDP.Engine && NDP.Engine.Storage) || null;
+
+  function migrateLegacy() {
+    if (!Storage) return;
     try {
-      const v = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-      if (!v) return { ash: 0, unlocks: {} , lastRun: null };
-      return v;
-    } catch (e) { return { ash: 0, unlocks: {}, lastRun: null }; }
+      const cur = Storage.getGameData(GAME_ID);
+      if (cur && Object.keys(cur).length) return;        // already migrated
+      const raw = localStorage.getItem(OLD_LS_KEY);
+      if (!raw) return;
+      const v = JSON.parse(raw);
+      if (!v || typeof v !== 'object') return;
+      const ash = (v.ash | 0);
+      Storage.setGameData(GAME_ID, {
+        unlocks: v.unlocks || {},
+        lastRun: v.lastRun || null
+      });
+      if (ash > 0) Storage.setGameWallet(GAME_ID, ash);
+      localStorage.removeItem(OLD_LS_KEY);
+    } catch (e) {}
   }
-  function saveMeta(m) { try { localStorage.setItem(LS_KEY, JSON.stringify(m)); } catch(e){} }
+
+  function loadMeta() {
+    migrateLegacy();
+    if (!Storage) return { ash: 0, unlocks: {}, lastRun: null };
+    const data = Storage.getGameData(GAME_ID) || {};
+    return {
+      ash: Storage.getGameWallet(GAME_ID) | 0,
+      unlocks: data.unlocks || {},
+      lastRun: data.lastRun || null
+    };
+  }
+
+  // saveMeta is the single sync point: in-memory `meta.ash` (the per-game
+  // wallet), `unlocks`, and `lastRun` are mirrored back into Storage. Call
+  // sites can keep mutating `meta.ash` directly; this writes the wallet
+  // authoritatively at the end.
+  function saveMeta(m) {
+    if (!Storage) return;
+    try {
+      Storage.setGameData(GAME_ID, {
+        unlocks: m.unlocks || {},
+        lastRun: m.lastRun || null
+      });
+      Storage.setGameWallet(GAME_ID, Math.max(0, m.ash | 0));
+    } catch (e) {}
+  }
 
   /* ==================== MAIN CLASS ==================== */
 
@@ -136,6 +183,14 @@
     init() {
       this.meta = loadMeta();
       this.scene = 'title_actions';
+      // Milestone counters for the per-game-wallet pattern. `coinsEarned()`
+      // reads these to award *theme* coins; they intentionally never touch
+      // `this.meta.ash` so the global theme economy stays decoupled from
+      // run-internal currency.
+      this.victoryAchieved = false;
+      this.battlesCleared = 0;
+      this.actsCleared = 0;
+      this._endTriggered = false;
       this.sfx = this.makeSfx({
         place:  { freq: 520, type: 'triangle', dur: 0.08, slide: 200, vol: 0.35 },
         shoot:  { freq: 700, type: 'square', dur: 0.04, vol: 0.14 },
@@ -305,9 +360,17 @@
         this.run = this.newRun();
         this.meta.lastRun = this.run; saveMeta(this.meta);
         this.scene = 'map';
+        this.victoryAchieved = false;
+        this.battlesCleared = 0;
+        this.actsCleared = 0;
+        this._endTriggered = false;
       } else if (btnResume.label && ptIn(this.click, btnResume) && this.meta.lastRun) {
         this.run = this.meta.lastRun;
         this.scene = 'map';
+        this.victoryAchieved = false;
+        this.battlesCleared = 0;
+        this.actsCleared = 0;
+        this._endTriggered = false;
       }
     }
 
@@ -976,12 +1039,13 @@
         // Gold reward + HP heal small
         this.run.totalEarned += B.gold;
         this.run.battlesDefeated++;
+        this.battlesCleared++;       // milestone: counts toward theme coins
         if (B.isElite) this.run.elitesDefeated++;
         this.run.curNode.cleared = true;
         // Trigger reward scene
         setTimeout(() => { this.openReward(B.isElite, B.isBoss); }, 500);
       } else {
-        // Defeat; grant ash
+        // Defeat; grant ash to the per-game wallet (the source of truth).
         const ash = Math.floor(5 + this.run.battlesDefeated * 2 + this.run.elitesDefeated * 5 + (this.run.act - 1) * 10);
         this.meta.ash = (this.meta.ash || 0) + ash;
         this.meta.lastRun = null;
@@ -989,6 +1053,13 @@
         this.addScore(this.run.totalEarned + ash);
         this.defeatAsh = ash;
         this.scene = 'defeat';
+        // Hand off to the engine state machine so main.js can show its end
+        // overlay and `coinsEarned()` (theme coins) gets called for this run.
+        // NG+/persistent: ash, unlocks carry over via the wallet/data store.
+        if (!this._endTriggered) {
+          this._endTriggered = true;
+          this.gameOver();
+        }
       }
     }
 
@@ -1082,7 +1153,19 @@
       const cur = this.run.curNode;
       if (cur.type === 'boss') {
         this.run.defeatsBossAct[this.run.act] = true;
-        if (this.run.act >= 3) { this.scene = 'victory'; return; }
+        this.actsCleared++;          // milestone: counts toward theme coins
+        if (this.run.act >= 3) {
+          // Final act cleared — true campaign victory.
+          this.scene = 'victory';
+          this.meta.lastRun = null;  // run is over; clear resume snapshot
+          saveMeta(this.meta);
+          if (!this._endTriggered) {
+            this._endTriggered = true;
+            this.victoryAchieved = true;
+            this.win();
+          }
+          return;
+        }
         this.run.act++;
         if (this.hasRelic('ironbark')) this.run.maxHp += 5;
         this.run.maxHp += 5;
@@ -1226,9 +1309,14 @@
       const r = { x: W/2 - 100, y: H - 100, w: 200, h: 50 };
       if (ptIn(this.click, r)) {
         if (this.scene === 'defeat' || this.scene === 'victory') {
-          // Reset to title
+          // Reset to title; clear per-run milestone counters so the next
+          // run's `coinsEarned()` starts fresh.
           this.scene = 'title_actions';
           this.run = this.newRun();
+          this.victoryAchieved = false;
+          this.battlesCleared = 0;
+          this.actsCleared = 0;
+          this._endTriggered = false;
         }
       }
     }
@@ -1779,7 +1867,17 @@
 
     hasRelic(id) { return this.run.relics.includes(id); }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 400)); }
+    // Theme coins are awarded per *milestone*, never per-pickup. `score`
+    // here is inflated by in-run gold/ash, so we ignore it and pay out for
+    // battles cleared, with a stiff bonus for clearing each act and a
+    // capstone bonus for the final victory. Calibrated to land in the
+    // 5–15 / 25–50 bands described in the migration plan.
+    coinsEarned() {
+      const battles = this.battlesCleared | 0;
+      const acts = this.actsCleared | 0;
+      const winBonus = this.victoryAchieved ? 25 : 0;
+      return battles * 1 + acts * 5 + winBonus;
+    }
   }
 
   /* ==================== HELPERS ==================== */

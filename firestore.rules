@@ -1,0 +1,59 @@
+// NotDop minigames — Firestore security rules for the `feedback` collection.
+//
+// IMPORTANT: This file is NOT auto-deployed (firebase.json has no firestore
+// section, because the (default) database in project ethan-488900 is shared
+// with other apps and we don't want to clobber their rules).
+//
+// To activate these rules, MERGE the `match /feedback/{id}` block below into
+// the rules currently published in the Firebase Console:
+//   https://console.firebase.google.com/project/ethan-488900/firestore/rules
+//
+// Without these rules in place, the Feedback button in the arcade will fail
+// silently (the SDK will reject writes with permission-denied).
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Public, write-only feedback inbox.
+    // Anyone on the site can create a feedback doc, no one can read/edit/delete
+    // them through the SDK. Owner reads via the Firebase Console.
+    match /feedback/{docId} {
+      allow create: if
+        // Exactly these fields, no extras.
+        request.resource.data.keys().hasOnly(
+          ['gameId', 'gameTitle', 'text', 'createdAt', 'userAgent', 'siteUrl']
+        ) &&
+        request.resource.data.keys().hasAll(
+          ['gameId', 'gameTitle', 'text', 'createdAt']
+        ) &&
+        // Type + length constraints.
+        request.resource.data.gameId is string &&
+        request.resource.data.gameId.size() >= 1 &&
+        request.resource.data.gameId.size() <= 50 &&
+        request.resource.data.gameTitle is string &&
+        request.resource.data.gameTitle.size() <= 100 &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() >= 1 &&
+        request.resource.data.text.size() <= 2000 &&
+        // Server-assigned timestamp only — clients can't backdate.
+        request.resource.data.createdAt == request.time &&
+        // Optional fields, if present, must be strings under 256/512 chars.
+        (
+          !('userAgent' in request.resource.data) ||
+          (request.resource.data.userAgent is string &&
+           request.resource.data.userAgent.size() <= 256)
+        ) &&
+        (
+          !('siteUrl' in request.resource.data) ||
+          (request.resource.data.siteUrl is string &&
+           request.resource.data.siteUrl.size() <= 512)
+        );
+
+      allow read, update, delete: if false;
+    }
+
+    // === Existing rules for other apps in this project go BELOW or ABOVE ===
+    // Do not delete other `match` blocks when pasting these into the Console.
+  }
+}

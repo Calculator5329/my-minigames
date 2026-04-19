@@ -5,9 +5,9 @@ Three-layer separation, scoped to a vanilla-JS single-page arcade:
 
 | Layer    | Code lives in        | Responsibility                                          |
 |----------|----------------------|---------------------------------------------------------|
-| UI       | `index.html`, `styles.css`, `main.js` | Selector grid, arcade view, shop, overlays. |
+| UI       | `index.html`, `styles.css`, `main.js` | Selector grid, arcade view, shop, overlays, feedback modal. |
 | Game     | `engine/`, `games/<id>/`              | Per-game state, update loop, render, input.  |
-| Service  | `engine/storage.js`, `engine/audio.js`, `engine/assets.js` | LocalStorage, Web Audio, asset preloading. |
+| Service  | `engine/storage.js`, `engine/audio.js`, `engine/assets.js`, `engine/firebase-config.js`, `engine/feedback.js` | LocalStorage, Web Audio, asset preloading, Firestore feedback inbox. |
 
 Dependencies flow downward only:
 - `main.js` → `engine/*` → no upward calls
@@ -15,9 +15,32 @@ Dependencies flow downward only:
 
 ## Module loading
 Static `<script>` tags in `index.html`. Order matters:
-1. Engine scripts (storage, input, audio, draw, game, assets, sprites)
+1. Engine scripts (storage, input, audio, draw, game, assets, sprites, firebase-config, feedback)
 2. Per-game `manifest.js` → `game.js` (manifest registers metadata, game.js calls `NDP.attachGame(id, klass)`)
 3. `main.js` last
+
+## Hosting + Backend
+- **Hosting:** Firebase Hosting (classic), site `notdop-minigames` in project
+  `ethan-488900` (a multi-site project shared with 6 other apps). Public dir is
+  the repo root; deploy ignores docs/scripts/screenshots/markdown. See
+  `firebase.json` and `.firebaserc`.
+- **Feedback inbox:** Firestore (default DB, native mode, `nam5`). Collection
+  `feedback`, write-only from clients (max 2000 chars, server-stamped time).
+  No auth — protection is via Firestore Rules (`firestore.rules` in repo root,
+  manually merged into the project's published rules in the Console because the
+  database is shared with other apps).
+- **SDK delivery:** Firebase Web Compat SDK (`firebase-app-compat.js` +
+  `firebase-firestore-compat.js`) lazy-loaded from gstatic on first feedback
+  modal open, so it doesn't block the initial page paint of any game.
+
+## Feedback service contract
+`NDP.Engine.Feedback`:
+- `submit(gameId, gameTitle, text) -> Promise<void>` — validates length,
+  enforces a 5s per-tab throttle, lazy-initialises Firebase, writes one doc to
+  `feedback/{auto-id}` with `{gameId, gameTitle, text, createdAt, userAgent, siteUrl}`.
+  Rejects with a user-facing `Error` on validation failure or write rejection.
+- `preload()` — kicks off SDK fetch in the background; called when the modal opens.
+- `MAX_LEN` — exposed for the UI character counter.
 
 ## BaseGame contract
 Every game extends `NDP.Engine.BaseGame` and implements:

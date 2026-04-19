@@ -111,6 +111,11 @@
       this.phase = 'intro';                  // intro | flight | boss | bossClear | shop | victory
       this.biomeIx = 0;
       this._phaseTimer = 0;
+      // Milestone counters for global theme-shop coins (see coinsEarned()).
+      // The in-run coinBonus from coin pickups feeds the per-game wallet via
+      // onEnd(), not the global pool.
+      this.biomesClearedThisRun = 0;
+      this.victoryAchieved = false;
 
       // Heli + physics
       this.heli = { y: H / 2, vy: 0, rotor: 0, tilt: 0 };
@@ -184,16 +189,24 @@
       this._refreshHud();
     }
 
-    onEnd() {
+    onEnd(score) {
       this.save.bestBiome = Math.max(this.save.bestBiome | 0, this.biomeIx);
       saveMeta({
         bestBiome: this.save.bestBiome,
         perks: this.save.perks,
         defeatedArray: !!this.save.defeatedArray
       });
+      // Per-game wallet is fed at the old score-derived rate, just routed
+      // here instead of into the global theme-shop pool. Coin pickups still
+      // matter for buying perks, they just don't double-dip into theme coins.
+      const purse = Math.max(0, Math.floor((score | 0) / 220));
+      if (purse > 0) Storage.addGameWallet('helicopter', purse);
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 220)); }
+    // Global theme-shop coins: 6 per biome cleared this run + 20 victory bonus.
+    coinsEarned(/*score*/) {
+      return (this.biomesClearedThisRun | 0) * 6 + (this.victoryAchieved ? 20 : 0);
+    }
 
     // ---------------- per-frame dispatch ----------------
     update(dt) {
@@ -774,6 +787,7 @@
       // Persist progression milestone immediately so a quit-after still saves.
       this.save.bestBiome = Math.max(this.save.bestBiome, this.biomeIx + 1);
       saveMeta({ bestBiome: this.save.bestBiome });
+      this.biomesClearedThisRun++;
     }
 
     _updateBossClear(dt) {
@@ -817,8 +831,8 @@
         if (r.kind === 'perk') {
           const p = r.perk;
           if (this.save.perks[p.id]) { this.shopMsg = p.name + ' already owned.'; return; }
-          if (Storage.getCoins() < p.cost) { this.shopMsg = 'Not enough coins for ' + p.name + '.'; return; }
-          if (!Storage.spendCoins(p.cost)) { this.shopMsg = 'Purchase failed.'; return; }
+          if (Storage.getGameWallet('helicopter') < p.cost) { this.shopMsg = 'Not enough coins for ' + p.name + '.'; return; }
+          if (!Storage.spendGameWallet('helicopter', p.cost)) { this.shopMsg = 'Purchase failed.'; return; }
           this.save.perks[p.id] = 1;
           saveMeta({ perks: this.save.perks });
           this._applyPerksLive(p.id);
@@ -854,6 +868,7 @@
       this._refreshHud();
       if (this._phaseTimer > 1.0 && Input.mouse.justPressed) {
         Input.mouse.justPressed = false;
+        this.victoryAchieved = true;
         this.win();
       }
     }
@@ -1312,9 +1327,9 @@
       ctx.fillText('HANGAR · spend coins on perks', W/2, 90);
       ctx.shadowBlur = 0;
 
-      const coins = Storage.getCoins();
+      const coins = Storage.getGameWallet('helicopter');
       ctx.fillStyle = '#ffd86b'; ctx.font = '16px ui-monospace, monospace';
-      ctx.fillText('● ' + coins + ' coins', W/2, 128);
+      ctx.fillText('Hangar fund: ● ' + coins, W/2, 128);
 
       this.shopRects = [];
       const cardW = 180, cardH = 200, gap = 18;

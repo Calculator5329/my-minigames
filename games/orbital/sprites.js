@@ -792,6 +792,57 @@
     <circle cx="32" cy="6"  r="2.5" fill="#c8a8ff"/>
   </svg>`;
 
+  // --- MORTAR BATTERY — squat artillery with skyward tube + sandbag base ---
+  S.turret_mortar = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c8945a"/><stop offset="100%" stop-color="#3a2010"/></linearGradient>
+      <linearGradient id="tube" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c8c8d8"/><stop offset="50%" stop-color="#5a6678"/><stop offset="100%" stop-color="#1a1e2a"/></linearGradient>
+      <radialGradient id="muzzle" cx="50%" cy="50%"><stop offset="0%" stop-color="#fff"/><stop offset="40%" stop-color="#ff8a40"/><stop offset="100%" stop-color="#ff204000"/></radialGradient>
+      <linearGradient id="sand" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d8a878"/><stop offset="100%" stop-color="#5a3814"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="58" rx="24" ry="4" fill="#000" opacity="0.55"/>
+    <ellipse cx="14" cy="50" rx="9" ry="6" fill="url(#sand)" stroke="#1a0a04" stroke-width="0.8"/>
+    <ellipse cx="50" cy="50" rx="9" ry="6" fill="url(#sand)" stroke="#1a0a04" stroke-width="0.8"/>
+    <ellipse cx="22" cy="55" rx="7" ry="4" fill="url(#sand)" stroke="#1a0a04" stroke-width="0.8"/>
+    <ellipse cx="42" cy="55" rx="7" ry="4" fill="url(#sand)" stroke="#1a0a04" stroke-width="0.8"/>
+    <line x1="9" y1="50" x2="55" y2="50" stroke="#3a2010" stroke-width="0.6" opacity="0.6"/>
+    <polygon points="14,46 22,38 42,38 50,46 42,52 22,52" fill="url(#hull)" stroke="#1a0a04" stroke-width="1.2" stroke-linejoin="round"/>
+    <circle cx="18" cy="46" r="1.2" fill="#ffd86b"/>
+    <circle cx="46" cy="46" r="1.2" fill="#ffd86b"/>
+    <circle cx="32" cy="48" r="2.5" fill="#ff8040" stroke="#1a0a04" stroke-width="0.8"/>
+    <ellipse cx="32" cy="36" rx="11" ry="6" fill="#2a1a0a" stroke="#1a0a04" stroke-width="1"/>
+    <rect x="26" y="6" width="12" height="32" rx="3" fill="url(#tube)" stroke="#0a0e18" stroke-width="1.2"/>
+    <rect x="26" y="14" width="12" height="1.5" fill="#10141e"/>
+    <rect x="26" y="22" width="12" height="1.5" fill="#10141e"/>
+    <rect x="26" y="30" width="12" height="1.5" fill="#10141e"/>
+    <ellipse cx="32" cy="6" rx="6" ry="2.5" fill="url(#muzzle)"/>
+    <ellipse cx="32" cy="6" rx="3" ry="1" fill="#fff" opacity="0.85"/>
+    <rect x="30.2" y="10" width="1.5" height="22" fill="#dde4f0" opacity="0.5"/>
+  </svg>`;
+
+  // --- CRYSTAL PRISM — magenta crystal cluster with refractive faces ---
+  S.turret_crystal = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="cf1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd0e8"/><stop offset="50%" stop-color="#ff80c8"/><stop offset="100%" stop-color="#5a1858"/></linearGradient>
+      <linearGradient id="cf2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ffe8f4"/><stop offset="100%" stop-color="#a040a0"/></linearGradient>
+      <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5a3a78"/><stop offset="100%" stop-color="#1a0a2e"/></linearGradient>
+      <radialGradient id="core" cx="50%" cy="50%"><stop offset="0%" stop-color="#fff"/><stop offset="35%" stop-color="#ff4fd8"/><stop offset="100%" stop-color="#5a1858"/></radialGradient>
+    </defs>
+    <ellipse cx="32" cy="58" rx="22" ry="4" fill="#000" opacity="0.55"/>
+    <polygon points="14,52 22,42 42,42 50,52 42,60 22,60" fill="url(#b)" stroke="#ff80c8" stroke-width="1.2" stroke-linejoin="round"/>
+    <circle cx="18" cy="52" r="1.1" fill="#ffd86b"/><circle cx="46" cy="52" r="1.1" fill="#ffd86b"/>
+    <circle cx="32" cy="52" r="2" fill="#ff4fd8"/>
+    <polygon points="32,4 24,16 24,38 32,46 40,38 40,16" fill="url(#cf1)" stroke="#1a0a2e" stroke-width="1.3" stroke-linejoin="round"/>
+    <polygon points="32,4 32,46 40,38 40,16" fill="url(#cf2)" opacity="0.7"/>
+    <polygon points="24,16 32,12 40,16 32,20" fill="#ffe8f4" opacity="0.85"/>
+    <line x1="32" y1="12" x2="32" y2="44" stroke="#ffe8f4" stroke-width="0.6" opacity="0.7"/>
+    <polygon points="14,28 8,32 14,36 16,32" fill="url(#cf1)" stroke="#1a0a2e" stroke-width="1"/>
+    <polygon points="50,28 56,32 50,36 48,32" fill="url(#cf1)" stroke="#1a0a2e" stroke-width="1"/>
+    <circle cx="32" cy="28" r="5" fill="url(#core)"/>
+    <circle cx="32" cy="28" r="1.6" fill="#fff"/>
+    <line x1="14" y1="46" x2="50" y2="46" stroke="#ff80c8" stroke-width="0.6" opacity="0.6"/>
+  </svg>`;
+
   // ==================================================================
   //  PHASE 2 — NEW ENEMIES
   // ==================================================================

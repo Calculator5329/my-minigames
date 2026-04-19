@@ -15,6 +15,15 @@
       this.W = W; this.H = H;
       this.save = Object.assign(F.defaultSave(), Storage.getGameData('franchise') || {});
       this.save.meta = Object.assign({ seed: 0, click: 0, rate: 0, time: 0, mgrs: 0 }, this.save.meta || {});
+      /* One-shot legacy reader: prior versions stored stardollars inside the
+         data blob (this.save.stardollars). Lift any leftover balance into the
+         per-game wallet and zero out the blob field so future writes don't
+         clobber the wallet. */
+      if ((this.save.stardollars | 0) > 0) {
+        Storage.addGameWallet('franchise', this.save.stardollars | 0);
+        this.save.stardollars = 0;
+        this._writeSave();
+      }
 
       this.phase = 'shop';   // 'shop' | 'play' | 'transition' | 'debrief'
       this.shopRects = [];
@@ -23,6 +32,10 @@
       this.peakNetWorth = 0;
       this.citiesCleared = 0;
       this.campaignWon = false;
+      /* Per-run milestone counters used for global-coin payout. */
+      this.citiesClearedThisRun = 0;
+      this.campaignsWonThisRun = 0;
+      this.victoryAchieved = false;
 
       this.cash = 0;
       this.clickPower = 1;
@@ -148,6 +161,7 @@
     endCity(reason) {
       if (reason === 'win') {
         this.citiesCleared = Math.max(this.citiesCleared, this.cityIdx + 1);
+        this.citiesClearedThisRun = (this.citiesClearedThisRun | 0) + 1;
         this.sfx.play('win');
         this.flash('#ffd86b', 0.3);
         if (this.cityIdx + 1 >= F.CITIES.length) {
@@ -168,15 +182,22 @@
     endCampaign(won) {
       const earned = F.stardollarsFor(this.peakNetWorth);
       this.debriefStardollars = earned;
-      this.save.stardollars = (this.save.stardollars || 0) + earned;
+      if (earned > 0) Storage.addGameWallet('franchise', earned);
       this.save.bestNetWorth = Math.max(this.save.bestNetWorth || 0, this.peakNetWorth);
       this.save.citiesCleared = Math.max(this.save.citiesCleared || 0, this.citiesCleared);
       this.save.totalEarned = (this.save.totalEarned || 0) + this.peakNetWorth;
-      if (won) this.save.campaignsWon = (this.save.campaignsWon || 0) + 1;
+      if (won) {
+        this.save.campaignsWon = (this.save.campaignsWon || 0) + 1;
+        this.campaignsWonThisRun = (this.campaignsWonThisRun | 0) + 1;
+        this.victoryAchieved = true;
+      }
       this._writeSave();
       this.phase = 'debrief';
       this.setScore(Math.floor(this.peakNetWorth));
     }
+
+    /* Wallet-aware accessor used in shop UI/spend paths. */
+    _stardollars() { return Storage.getGameWallet('franchise') | 0; }
 
     _writeSave() {
       Storage.setGameData('franchise', this.save);
@@ -449,9 +470,9 @@
     /*  Update                                                            */
     /* ----------------------------------------------------------------- */
     update(dt) {
-      if (this.phase === 'shop') return this._updateShop(dt);
-      if (this.phase === 'debrief') return this._updateDebrief(dt);
-      if (this.phase === 'transition') return this._updateTransition(dt);
+      if (this.phase === 'shop') { this._updateShop(dt); this.setHud(this._hud()); return; }
+      if (this.phase === 'debrief') { this._updateDebrief(dt); this.setHud(this._hud()); return; }
+      if (this.phase === 'transition') { this._updateTransition(dt); this.setHud(this._hud()); return; }
       this._updatePlay(dt);
     }
 
@@ -467,8 +488,7 @@
               const lvl = this.save.meta[u.id] || 0;
               if (lvl >= u.tiers.length) return;
               const cost = u.costs[lvl];
-              if ((this.save.stardollars || 0) >= cost) {
-                this.save.stardollars -= cost;
+              if (Storage.spendGameWallet('franchise', cost | 0)) {
                 this.save.meta[u.id] = lvl + 1;
                 this._writeSave();
                 this.sfx.play('buy', { freq: 660 + lvl * 40 });
@@ -829,10 +849,10 @@
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillText('Best campaign: ' + (cleared > 0 ? cleared + '/5 cities cleared' : 'no runs yet'), W / 2, 152);
 
-      // Stardollars header
+      // Stardollars header (sourced from per-game wallet)
       ctx.fillStyle = '#ffd86b';
       ctx.font = 'bold 18px ui-monospace, monospace';
-      ctx.fillText('★ ' + fmt(this.save.stardollars || 0) + ' STARDOLLARS', W / 2, 180);
+      ctx.fillText('★ ' + fmt(this._stardollars()) + ' STARDOLLARS', W / 2, 180);
 
       // Meta upgrade cards (5 cards across two rows: 3 + 2)
       this.shopRects = [];
@@ -848,7 +868,7 @@
           const lvl = this.save.meta[u.id] || 0;
           const maxed = lvl >= u.tiers.length;
           const cost = maxed ? 0 : u.costs[lvl];
-          const can = !maxed && (this.save.stardollars || 0) >= cost;
+          const can = !maxed && this._stardollars() >= cost;
           ctx.fillStyle = maxed ? '#0e2a1a' : can ? '#1a1a14' : '#1a1014';
           ctx.fillRect(x, y, cardW, cardH);
           ctx.strokeStyle = u.color; ctx.lineWidth = 2;
@@ -1389,10 +1409,13 @@
     /* ----------------------------------------------------------------- */
     /*  Engine hooks                                                       */
     /* ----------------------------------------------------------------- */
-    coinsEarned(score) {
-      // 1 coin per $5K of peak net worth, capped soft. A typical city-3
-      // finish earns ~80 coins; a full campaign clear ~8000.
-      return Math.max(0, Math.floor(score / 5000));
+    coinsEarned() {
+      // Milestone-based: cities cleared this run + bonus per campaign won.
+      // Decoupled from in-run net worth so the global theme-shop coin payout
+      // can't be inflated by the autobuy economy loop.
+      const c = this.citiesClearedThisRun | 0;
+      const w = this.campaignsWonThisRun | 0;
+      return Math.max(0, c * 5 + w * 25);
     }
   }
 

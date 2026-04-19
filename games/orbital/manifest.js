@@ -30,6 +30,8 @@ NDP.registerManifest({
       { key: 'orb_turret_engineer', src: sp.turret_engineer, type: 'image' },
       { key: 'orb_turret_cryo',   src: sp.turret_cryo,   type: 'image' },
       { key: 'orb_turret_chrono', src: sp.turret_chrono, type: 'image' },
+      { key: 'orb_turret_mortar', src: sp.turret_mortar, type: 'image' },
+      { key: 'orb_turret_crystal',src: sp.turret_crystal,type: 'image' },
       { key: 'orb_enemy_swarmer', src: sp.enemy_swarmer, type: 'image' },
       { key: 'orb_enemy_summoner',src: sp.enemy_summoner,type: 'image' },
       { key: 'orb_bolt',          src: sp.bolt,          type: 'image' },

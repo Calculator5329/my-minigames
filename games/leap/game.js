@@ -2,13 +2,18 @@
    Procedurally generated levels. Goal: reach the flag at the right edge.
    Collect coins (+10) and gems (+50). Stomping enemies: +30. Touching an
    enemy from side: lose a life. 3 lives. Levels scale: longer, more enemies,
-   more gaps. */
+   more gaps.
+
+   Currency model: per-game wallet ('Sprigs') under Storage.*GameWallet
+   ('leap'). Pre-run shop spends Sprigs only. Wallet is awarded at end-of-run
+   from level milestones. NG+/persistent. */
 (function () {
   const NDP = window.NDP;
   const { BaseGame, Input, Assets, Storage } = NDP.Engine;
 
   const W = 960, H = 600;
   const TILE = 40;
+  const GID = 'leap';
   const GROUND_Y = H - TILE * 2;
 
   const UPGRADES = [
@@ -29,6 +34,8 @@
       this.shopRects = [];
       this.level = 1;
       this.lives = 3 + this.save.upgrades.life;
+      this.levelsClearedThisRun = 0;
+      this.victoryAchieved = false;
       this.buildLevel();
       this.sfx = this.makeSfx({
         jump:  { freq: 440, type: 'square', dur: 0.08, slide: 440, vol: 0.25 },
@@ -363,6 +370,7 @@
       if (!bossBlocking && Math.abs(p.x - this.goal.x) < 30 && Math.abs((p.y - p.h/2) - this.goal.y) < 50) {
         this.completed = true;
         this.completedTimer = 0;
+        this.levelsClearedThisRun++;
         this.addScore(100 + this.level * 20);
         this.sfx.play('goal');
         this.flash('#fff', 0.2);
@@ -387,6 +395,7 @@
       this.flash('#f44', 0.2);
       if (fell || this.lives <= 0) {
         if (this.lives <= 0) {
+          this._awardWallet();
           this.gameOver();
           return;
         }
@@ -569,6 +578,11 @@
       }})) {}
     }
 
+    _awardWallet() {
+      const award = this.coinsEarned();
+      if (award > 0) Storage.addGameWallet(GID, award);
+    }
+
     // -------- SHOP --------
     _updateShop(dt) {
       if (Input.mouse.justPressed) {
@@ -579,14 +593,12 @@
             if (r.kind === 'buy') {
               const u = UPGRADES[r.i];
               const lvl = this.save.upgrades[u.id] || 0;
-              if (lvl < u.max && Storage.getCoins() >= u.cost) {
-                if (Storage.spendCoins(u.cost)) {
-                  this.save.upgrades[u.id] = lvl + 1;
-                  Storage.setGameData('leap', { bestLevel: this.save.bestLevel, upgrades: this.save.upgrades });
-                  this.sfx.play('buy');
-                  this.lives = 3 + this.save.upgrades.life;
-                  if (this.p) this.p.dashReady = !!this.save.upgrades.dash;
-                }
+              if (lvl < u.max && Storage.spendGameWallet(GID, u.cost)) {
+                this.save.upgrades[u.id] = lvl + 1;
+                Storage.setGameData('leap', { bestLevel: this.save.bestLevel, upgrades: this.save.upgrades });
+                this.sfx.play('buy');
+                this.lives = 3 + this.save.upgrades.life;
+                if (this.p) this.p.dashReady = !!this.save.upgrades.dash;
               }
               return;
             }
@@ -607,9 +619,9 @@
       ctx.fillStyle = '#cfe8ff';
       ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('boss every 5 levels. best: level ' + this.save.bestLevel, W / 2, 96);
-      ctx.fillStyle = '#ffcc33';
+      ctx.fillStyle = '#ffd86b';
       ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('\u25CF ' + Storage.getCoins() + ' coins', W / 2, 124);
+      ctx.fillText('Sprigs: \u25CF ' + Storage.getGameWallet(GID), W / 2, 124);
 
       this.shopRects = [];
       const startX = 120, startY = 170;
@@ -618,7 +630,7 @@
         const u = UPGRADES[i];
         const lvl = this.save.upgrades[u.id] || 0;
         const maxed = lvl >= u.max;
-        const canAfford = !maxed && Storage.getCoins() >= u.cost;
+        const canAfford = !maxed && Storage.getGameWallet(GID) >= u.cost;
         const col = i % 2, row = (i / 2) | 0;
         const rx = startX + col * (cellW + 20);
         const ry = startY + row * (cellH + 16);
@@ -653,7 +665,11 @@
       this.shopRects.push({ x: cbx, y: cby, w: cbw, h: cbh, kind: 'launch' });
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 50)); }
+    coinsEarned() {
+      const cleared = this.levelsClearedThisRun | 0;
+      const winBonus = this.victoryAchieved ? 20 : 0;
+      return cleared * 3 + winBonus;
+    }
   }
 
   NDP.attachGame('leap', LeapGame);

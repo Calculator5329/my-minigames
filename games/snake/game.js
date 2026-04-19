@@ -125,6 +125,11 @@
       //   victory  → full campaign cleared (calls win() on click)
       this.phase = 'intro';
       this.biomeIx = 0;
+      // Milestone counters for the global theme-shop economy. coinsEarned()
+      // pays out for biomes actually cleared in this run plus a victory
+      // bonus, never from apple-inflated score.
+      this.biomesClearedThisRun = 0;
+      this.victoryAchieved = false;
 
       this.snake = [];
       this.dir = { x: 1, y: 0 };
@@ -181,7 +186,14 @@
       this._refreshHud();
     }
 
-    onEnd() { this._persistBest(); }
+    onEnd(score) {
+      this._persistBest();
+      // Pre-migration earn rate (score / 35) now funds the per-game snake
+      // wallet instead of the global theme-shop pool. Apple-driven score is
+      // shop currency, milestones drive global coins (see coinsEarned).
+      const purse = Math.max(0, Math.floor((score | 0) / 35));
+      if (purse > 0) Storage.addGameWallet('snake', purse);
+    }
 
     _persistBest() {
       this.save.bestBiome = Math.max(this.save.bestBiome, this.biomeIx);
@@ -778,6 +790,7 @@
 
       this.save.bestBiome = Math.max(this.save.bestBiome, this.biomeIx + 1);
       persist(this.save);
+      this.biomesClearedThisRun++;
 
       this.phase = 'between';
       this.betweenTimer = 0;
@@ -815,8 +828,8 @@
         if (r.kind === 'perk') {
           const p = r.perk;
           if (this.save.perks[p.id]) return;          // already owned
-          if (Storage.getCoins() < p.cost) return;    // broke
-          if (!Storage.spendCoins(p.cost)) return;
+          if (Storage.getGameWallet('snake') < p.cost) return;    // broke
+          if (!Storage.spendGameWallet('snake', p.cost)) return;
           this.save.perks[p.id] = 1;
           persist(this.save);
           this.sfx.play('buy');
@@ -832,6 +845,7 @@
       this.victoryTimer += dt;
       if (this.victoryTimer > 0.7 && Input.mouse.justPressed) {
         Input.mouse.justPressed = false;
+        this.victoryAchieved = true;
         this.win();
       }
     }
@@ -847,7 +861,11 @@
       this.gameOver();
     }
 
-    coinsEarned(score) { return Math.max(0, Math.floor(score / 35)); }
+    // Global theme-shop coins: 6 per biome cleared this run + 20 victory bonus.
+    // Apples no longer leak into the global pool through score.
+    coinsEarned(/*score*/) {
+      return (this.biomesClearedThisRun | 0) * 6 + (this.victoryAchieved ? 20 : 0);
+    }
 
     // ===========================================================================
     // RENDER
@@ -1136,9 +1154,9 @@
       const next = BIOMES[this.biomeIx + 1];
       ctx.fillStyle = '#fde68a'; ctx.font = '14px ui-monospace, monospace';
       ctx.fillText('Next biome: ' + next.name.toUpperCase(), cx, 108);
-      const coins = Storage.getCoins();
+      const coins = Storage.getGameWallet('snake');
       ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 16px ui-monospace, monospace';
-      ctx.fillText('● ' + coins + ' coins', cx, 134);
+      ctx.fillText('Snake purse: ● ' + coins, cx, 134);
 
       this.shopRects = [];
       const cardW = 188, cardH = 226, gap = 18;

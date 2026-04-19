@@ -20,6 +20,7 @@
 
     // ======== DART STATION — light interceptor ========
     dart: {
+      unlock: { round: 1 },
       base: {
         name: 'Dart Station', short: 'Dart', cost: 180,
         sprite: 'orb_turret_dart', color: '#7ae0ff',
@@ -61,6 +62,7 @@
 
     // ======== PLASMA CANNON — splash damage ========
     cannon: {
+      unlock: { round: 1 },
       base: {
         name: 'Plasma Cannon', short: 'Cannon', cost: 450,
         sprite: 'orb_turret_cannon', color: '#ffb347',
@@ -102,6 +104,7 @@
 
     // ======== BEAM ARRAY — armor breaker ========
     beam: {
+      unlock: { round: 4 },
       base: {
         name: 'Beam Array', short: 'Beam', cost: 700,
         sprite: 'orb_turret_beam', color: '#ff4fd8',
@@ -143,6 +146,7 @@
 
     // ======== GRAVITY WELL — controller ========
     gravity: {
+      unlock: { round: 2 },
       base: {
         name: 'Gravity Well', short: 'Gravity', cost: 600,
         sprite: 'orb_turret_gravity', color: '#b890ff',
@@ -184,6 +188,7 @@
 
     // ======== SOLAR FLARE — DoT ========
     flare: {
+      unlock: { round: 7 },
       base: {
         name: 'Solar Flare', short: 'Flare', cost: 1200,
         sprite: 'orb_turret_flare', color: '#ffd86b',
@@ -225,6 +230,7 @@
 
     // ======== SINGULARITY — panic button ========
     sing: {
+      unlock: { round: 22 },
       base: {
         name: 'Singularity', short: 'Sing', cost: 3000,
         sprite: 'orb_turret_sing', color: '#a070ff',
@@ -267,6 +273,7 @@
 
     // ======== TESLA COIL — swarm killer ========
     tesla: {
+      unlock: { round: 5 },
       base: {
         name: 'Tesla Coil', short: 'Tesla', cost: 850,
         sprite: 'orb_turret_tesla', color: '#7aaaff',
@@ -309,6 +316,7 @@
 
     // ======== MISSILE SILO — boss melter ========
     missile: {
+      unlock: { round: 12 },
       base: {
         name: 'Missile Silo', short: 'Missile', cost: 1500,
         sprite: 'orb_turret_missile', color: '#ff6060',
@@ -350,6 +358,7 @@
 
     // ======== SUPPORT BEACON — buffer ========
     support: {
+      unlock: { round: 10 },
       base: {
         name: 'Support Beacon', short: 'Support', cost: 900,
         sprite: 'orb_turret_support', color: '#4ade80',
@@ -392,6 +401,7 @@
 
     // ======== QUANT ADVISOR — economist ========
     quant: {
+      unlock: { round: 14 },
       base: {
         name: 'Quant Advisor', short: 'Quant', cost: 800,
         sprite: 'orb_turret_quant', color: '#ffd86b',
@@ -436,6 +446,7 @@
 
     // ======== SNIPER PLATFORM — global single-shot ========
     sniper: {
+      unlock: { round: 8 },
       base: {
         name: 'Sniper Platform', short: 'Sniper', cost: 700,
         sprite: 'orb_turret_sniper', color: '#9aa6c0',
@@ -477,6 +488,7 @@
 
     // ======== ENGINEER STATION — mines + sentry ========
     engineer: {
+      unlock: { round: 16 },
       base: {
         name: 'Engineer Station', short: 'Engineer', cost: 950,
         sprite: 'orb_turret_engineer', color: '#a87a40',
@@ -519,6 +531,7 @@
 
     // ======== CRYO STATION — freeze ========
     cryo: {
+      unlock: { round: 6 },
       base: {
         name: 'Cryo Station', short: 'Cryo', cost: 800,
         sprite: 'orb_turret_cryo', color: '#a8e8ff',
@@ -559,8 +572,93 @@
       }
     },
 
+    // ======== MORTAR — long-arc heavy artillery ========
+    mortar: {
+      unlock: { round: 11 },
+      base: {
+        name: 'Mortar Battery', short: 'Mortar', cost: 1100,
+        sprite: 'orb_turret_mortar', color: '#c8945a',
+        range: 220, fireRate: 0.5, dmg: 28, splash: 75,
+        projSpeed: 280, proj: 'plasma', priority: 'strong',
+        desc: 'Lobs heavy shells at high arcs. Big splash, long range.'
+      },
+      paths: {
+        A: {
+          id: 'siege', name: 'Siege Cannon', accent: '#ff7a30',
+          tiers: [
+            { cost:  500, label: 'High Explosive', desc: '+12 dmg, +20 splash',
+              glyph: 'splash', patch: { dmg: 40, splash: 95 } },
+            { cost:  900, label: 'Reinforced Tube', desc: '+30 range, +14 dmg',
+              glyph: 'range', patch: { range: 250, dmg: 54 } },
+            { cost: 1700, label: 'Bunker Buster', desc: 'shells crack armor',
+              glyph: 'shield', patch: { dmg: 78, antiArmor: true, splash: 110 } },
+            { cost: 4200, label: 'Siege Mortar', desc: 'massive shells; ability',
+              glyph: 'nuke', patch: { dmg: 130, splash: 150, fireRate: 0.7, antiArmor: true },
+              ability: 'carpetBomb' }
+          ]
+        },
+        B: {
+          id: 'barrage', name: 'Barrage Mode', accent: '#ffd86b',
+          tiers: [
+            { cost:  450, label: 'Twin Tubes', desc: 'fires 2 shells per shot',
+              glyph: 'burst', patch: { multiShot: 2, spread: 0.18 } },
+            { cost:  850, label: 'Faster Loader', desc: '+0.4 fire rate',
+              glyph: 'rate', patch: { fireRate: 0.9 } },
+            { cost: 1600, label: 'Saturation Fire', desc: '4 shells per shot',
+              glyph: 'burst', patch: { multiShot: 4, spread: 0.30, dmg: 36 } },
+            { cost: 4000, label: 'Kingmaker', desc: '6-shell salvo; ability',
+              glyph: 'splash', patch: { multiShot: 6, spread: 0.45, splash: 95, dmg: 50 },
+              ability: 'scatterShot' }
+          ]
+        }
+      }
+    },
+
+    // ======== CRYSTAL PRISM — piercing prismatic bolts ========
+    crystal: {
+      unlock: { round: 17 },
+      base: {
+        name: 'Crystal Prism', short: 'Crystal', cost: 1300,
+        sprite: 'orb_turret_crystal', color: '#ff80c8',
+        range: 175, fireRate: 1.4, dmg: 16, pierce: 5,
+        projSpeed: 620, proj: 'bolt', priority: 'first',
+        desc: 'Refracted prism bolts pierce many enemies in a line.'
+      },
+      paths: {
+        A: {
+          id: 'refract', name: 'Refraction', accent: '#ff80c8',
+          tiers: [
+            { cost:  600, label: 'Sharper Facets', desc: '+8 dmg, +2 pierce',
+              glyph: 'pierce', patch: { dmg: 24, pierce: 7 } },
+            { cost: 1100, label: 'Hyper Crystal', desc: '+12 dmg, +0.5 rate',
+              glyph: 'dmg', patch: { dmg: 36, fireRate: 1.9 } },
+            { cost: 1900, label: 'Spectrum Split', desc: 'fires 3 prism bolts',
+              glyph: 'burst', patch: { multiShot: 3, spread: 0.22, pierce: 9 } },
+            { cost: 4500, label: 'Rainbow Lance', desc: 'pierces ALL; ability',
+              glyph: 'star', patch: { dmg: 60, pierce: 30, fireRate: 2.5, multiShot: 3 },
+              ability: 'spectrumBurst' }
+          ]
+        },
+        B: {
+          id: 'shatter', name: 'Shatter Field', accent: '#c8a8ff',
+          tiers: [
+            { cost:  500, label: 'Brittle Touch', desc: 'hits leave brittle',
+              glyph: 'crit', patch: { brittleMul: 1.5 } },
+            { cost: 1000, label: 'Resonance', desc: 'splash 35 on hit',
+              glyph: 'splash', patch: { splash: 35, dmg: 22 } },
+            { cost: 1800, label: 'Shockwave', desc: 'splash 60, +brittle',
+              glyph: 'splash', patch: { splash: 60, brittleMul: 2.0 } },
+            { cost: 4200, label: 'Dimensional Cut', desc: 'huge AoE rounds; ability',
+              glyph: 'star', patch: { dmg: 50, splash: 95, brittleMul: 2.5, fireRate: 2.0 },
+              ability: 'avalanche' }
+          ]
+        }
+      }
+    },
+
     // ======== CHRONO FIELD — slow + tower buff ========
     chrono: {
+      unlock: { round: 19 },
       base: {
         name: 'Chrono Field', short: 'Chrono', cost: 1100,
         sprite: 'orb_turret_chrono', color: '#c8a8ff',
@@ -606,6 +704,13 @@
   function keys() { return Object.keys(TOWERS); }
   function get(k) { return TOWERS[k]; }
   function base(k) { return TOWERS[k] && TOWERS[k].base; }
+  function unlockRound(k) {
+    const t = TOWERS[k];
+    return (t && t.unlock && t.unlock.round) || 1;
+  }
+  function isUnlocked(k, bestRound) {
+    return unlockRound(k) <= (bestRound | 0);
+  }
 
-  O.Towers = { catalog: TOWERS, keys, get, base };
+  O.Towers = { catalog: TOWERS, keys, get, base, unlockRound, isUnlocked };
 })();

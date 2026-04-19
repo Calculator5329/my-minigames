@@ -15,9 +15,7 @@ Thumbs.db
 .claude/
 .playwright-mcp/
 
-reactor-*.png
-bloom-*.png
-diner-*.png
-frog-*.png
-frogger-*.png
-sigil-*.png
+# Stray dev screenshots at repo root — real screenshots live in docs/screenshots/.
+# Game-folder PNGs (under games/<id>/ and assets/) stay tracked.
+/*.png
+firebase-debug*.log

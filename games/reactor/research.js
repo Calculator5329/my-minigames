@@ -55,11 +55,32 @@
 
   /* ---- State load/save ---- */
 
+  /* One-shot legacy reader: prior versions stored RP inside
+     gameData.research.points. Lift those into the per-game wallet on first
+     access and drop the field from the data blob so future writes stay clean. */
+  let _migrated = false;
+  function migrateLegacy() {
+    if (_migrated) return;
+    const S = Storage();
+    if (!S) return;
+    _migrated = true;
+    const data = S.getGameData('reactor') || {};
+    const r = data.research || {};
+    if ((r.points | 0) > 0) {
+      S.addGameWallet('reactor', r.points | 0);
+      const cleaned = Object.assign({}, r);
+      delete cleaned.points;
+      S.mergeGameData('reactor', { research: cleaned });
+    }
+  }
+
   function getState() {
-    const data = Storage().getGameData('reactor') || {};
+    migrateLegacy();
+    const S = Storage();
+    const data = (S && S.getGameData('reactor')) || {};
     const research = data.research || {};
     return {
-      points: research.points | 0,
+      points: S ? (S.getGameWallet('reactor') | 0) : 0,
       bought: Object.assign({}, research.bought || {}),
       bestDay: research.bestDay | 0,
       campaignsBeaten: research.campaignsBeaten | 0,
@@ -67,26 +88,36 @@
     };
   }
 
+  /* Persist only the data-blob fields (bought/bestDay/...). RP lives in the
+     per-game wallet and is written via add/spend helpers. */
   function saveState(state) {
-    Storage().mergeGameData('reactor', { research: state });
+    const persisted = {
+      bought: state.bought || {},
+      bestDay: state.bestDay | 0,
+      campaignsBeaten: state.campaignsBeaten | 0,
+      endlessUnlocked: !!state.endlessUnlocked
+    };
+    Storage().mergeGameData('reactor', { research: persisted });
   }
 
   function award(rp) {
-    const s = getState();
-    s.points = Math.max(0, (s.points | 0) + (rp | 0));
-    saveState(s);
-    return s;
+    migrateLegacy();
+    const amt = Math.max(0, rp | 0);
+    if (amt > 0) Storage().addGameWallet('reactor', amt);
+    return getState();
   }
 
   function isBought(id) { return !!getState().bought[id]; }
 
   function buy(id) {
+    migrateLegacy();
     const s = getState();
     if (s.bought[id]) return { ok: false, reason: 'already' };
     const node = CATALOG.find(n => n.id === id);
     if (!node) return { ok: false, reason: 'missing' };
-    if (s.points < node.cost) return { ok: false, reason: 'rp' };
-    s.points -= node.cost;
+    if (!Storage().spendGameWallet('reactor', node.cost | 0)) {
+      return { ok: false, reason: 'rp' };
+    }
     s.bought[id] = 1;
     saveState(s);
     return { ok: true };

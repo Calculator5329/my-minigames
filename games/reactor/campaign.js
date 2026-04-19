@@ -176,8 +176,33 @@
     else title = 'DAY ' + recap.day + ' COMPLETE';
     ctx.fillText(title, W/2, 38);
 
+    /* Cause-of-death banner (only on meltdowns). Sits in the left column
+       above STATS so it doesn't collide with the research panel on the
+       right. The cause text wraps onto multiple lines as needed. */
+    let causeBottom = 0;
+    if (recap.kind === 'meltdown' && recap.cause) {
+      const cx = 40, cy = 60, cw = 350;
+      ctx.font = '12px ui-monospace, monospace';
+      const lines = wrapLines(ctx, recap.cause, cw - 20);
+      const ch = 22 + lines.length * 16 + 8;
+      ctx.fillStyle = 'rgba(60,8,16,0.85)';
+      ctx.fillRect(cx, cy, cw, ch);
+      ctx.strokeStyle = '#ff5e7e'; ctx.lineWidth = 2;
+      ctx.strokeRect(cx + 1, cy + 1, cw - 2, ch - 2);
+      ctx.fillStyle = '#ff8a8a';
+      ctx.font = 'bold 12px ui-monospace, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('CAUSE OF DEATH', cx + 10, cy + 6);
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px ui-monospace, monospace';
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], cx + 10, cy + 24 + i * 16);
+      }
+      causeBottom = cy + ch;
+    }
+
     /* Stats column (left) */
-    const sx = 60, sy = 80;
+    const sx = 60, sy = causeBottom > 0 ? causeBottom + 10 : 80;
     ctx.fillStyle = '#cfe9ff';
     ctx.font = 'bold 14px ui-monospace, monospace';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -212,8 +237,30 @@
       ctx.fillText((o.passed ? '[x] ' : '[ ] ') + o.label, sx, oy + 24 + i * 18);
     }
 
+    /* Recent heat events — only useful on meltdowns. Shows the last few
+       heat additions with timestamps so the player can replay what
+       happened. Compact list, max 5 entries. */
+    let belowObj = oy + 24 + recap.objectives.length * 18 + 16;
+    if (recap.kind === 'meltdown' && recap.heatLog && recap.heatLog.length > 0) {
+      ctx.fillStyle = '#cfe9ff';
+      ctx.font = 'bold 14px ui-monospace, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('LAST HEAT EVENTS', sx, belowObj);
+      ctx.font = '12px ui-monospace, monospace';
+      const entries = recap.heatLog.slice(-5);
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const sign = e.amount > 0 ? '+' : (e.amount < 0 ? '' : '·');
+        const amtStr = e.amount === 0 ? '' : (sign + e.amount + ' heat');
+        ctx.fillStyle = e.amount > 0 ? '#ff8a8a' : (e.amount < 0 ? '#7cd9ff' : '#8892a6');
+        ctx.fillText('t=' + (e.t | 0) + 's   ' + e.label + (amtStr ? '   ' + amtStr : '') +
+          '   →' + e.after + '%', sx, belowObj + 22 + i * 16);
+      }
+      belowObj += 22 + entries.length * 16 + 10;
+    }
+
     /* RP earned line */
-    const ry = oy + 24 + recap.objectives.length * 18 + 18;
+    const ry = belowObj + 4;
     ctx.fillStyle = '#ffd86b';
     ctx.font = 'bold 16px ui-monospace, monospace';
     const surviveBonus = (recap.kind === 'meltdown') ? 0 : 1;
@@ -323,12 +370,36 @@
       objectives:    ds.objectives,
       objRP,
       totalRP,
+      /* Diagnostics — meltdowns surface cause + recent heat events so the
+         player can see exactly what killed them. */
+      cause:        game.deathCause || null,
+      heatLog:      (game.heatLog || []).slice(-6),
+      peakHeatPct:  game.peakHeatPct || 0,
       researchRects: [],
       buttonRects: []
     };
   }
 
   /* ---------- Helpers ---------- */
+
+  /* Word-wrap helper used by the cause-of-death banner. Returns an array of
+     lines that each fit inside maxW given the current ctx font. */
+  function wrapLines(ctx, text, maxW) {
+    const words = String(text || '').split(' ');
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line);
+        line = w;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
 
   function fmt(n) {
     if (n < 1000) return Math.floor(n).toString();
