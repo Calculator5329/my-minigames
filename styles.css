@@ -107,10 +107,11 @@ html, body {
   border-radius: var(--card-radius);
   overflow: hidden;
   cursor: pointer;
-  /* 2:1 is shorter than 16:9 — at 1884-1920 viewports this is the sweet
-     spot that lets all six rows fit in the visible area, while the canvas
-     preview is still tall enough to read. */
-  aspect-ratio: 2 / 1;
+  /* 4:3 gives the preview canvas room to breathe — taller than 16:9 means
+     fewer rows fit per viewport, so the grid scrolls below the fold. The
+     flex-wrap + justify-content: center keeps the partial last row from
+     looking lopsided regardless of how many rows are visible. */
+  aspect-ratio: 4 / 3;
   background: #0b0e13;
   border: 1px solid #ffffff0f;
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;

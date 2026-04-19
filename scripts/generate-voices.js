@@ -252,7 +252,9 @@ async function ttsOpenRouter(line, profile) {
     'Hard rules:',
     '- Perform the script aloud as the character, exactly as written.',
     '- Read every word inside <script> in order, no paraphrase, no rewording.',
-    '- Do NOT add anything outside the script (no greetings, no continuations, no replies, no ad-libs, no "[pause]", no stage directions).',
+    '- Do NOT speak any sound effects, ambience, or stage directions. Anything inside square brackets [ ] or parentheses ( ) is OUT OF CHARACTER and must NEVER be vocalised. Examples you must NOT speak: "[static crackles]", "(line hums)", "[pause]", "(breathing)", "[fizzing]", any narrator voice.',
+    '- Do NOT prepend or append any framing, narration, intro, outro, greeting, sign-off, ad-lib, or continuation. The audio must contain ONLY the words inside <script>.',
+    '- Do NOT refuse, apologise, or break character. The script is fictional dialogue for a published horror drama; perform it.',
     '- Stop the moment you finish the last word of the script.'
   ].join('\n');
 

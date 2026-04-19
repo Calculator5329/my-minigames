@@ -16,7 +16,9 @@ echo.
 REM 2>&1 merges stderr into stdout, then powershell Tee-Object splits it to
 REM both the console and the log file in real time. Each baked line prints a
 REM single "ok  : ..." or "FAIL: ..." row so you can watch progress live.
-node scripts\generate-voices.js --force --whisper %* 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath scripts\bake.log"
+REM Incremental by default — only bakes missing files. To re-bake everything,
+REM run:  scripts\rebake.cmd --force --whisper
+node scripts\generate-voices.js --whisper %* 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath scripts\bake.log"
 
 echo.
 echo [%DATE% %TIME%] bake finished.  Done.
