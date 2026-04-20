@@ -15,9 +15,11 @@
       name: paragonDef.name,
       accent: paragonDef.accent || '#ffd86b'
     };
-    if (game.particles && game.particles.add) {
-      game.particles.add(tower.x, tower.y, paragonDef.accent || '#ffd86b',
-        { count: 120, life: 1.2, speed: 400, size: 5 });
+    if (game.particles && game.particles.burst) {
+      game.particles.burst(tower.x, tower.y, 120, {
+        color: paragonDef.accent || '#ffd86b',
+        life: 1.2, speed: 400, size: 5
+      });
     }
     if (game.flash) game.flash(paragonDef.accent || '#ffd86b', 0.45);
   }
