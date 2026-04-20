@@ -1,0 +1,24 @@
+{
+  "id": "intro-and",
+  "track": "intro",
+  "order": 3,
+  "title": "And Logic",
+  "brief": "Output Y is 1 only when both A and B are 1.",
+  "difficulty": 1,
+  "prerequisites": ["intro-not"],
+  "availableGates": ["AND"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [0] },
+    { "in": [0, 1], "out": [0] },
+    { "in": [1, 0], "out": [0] },
+    { "in": [1, 1], "out": [1] }
+  ],
+  "parGates": 1,
+  "hints": [
+    "Single AND gate, two inputs, one output."
+  ]
+}

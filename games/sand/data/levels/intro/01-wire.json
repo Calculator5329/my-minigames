@@ -1,0 +1,22 @@
+{
+  "id": "intro-wire",
+  "track": "intro",
+  "order": 1,
+  "title": "Wire It Up",
+  "brief": "Connect the input A to the output Y. Drag from the right port of A to the left port of Y.",
+  "difficulty": 1,
+  "availableGates": [],
+  "io": {
+    "inputs":  [{ "label": "A" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0], "out": [0] },
+    { "in": [1], "out": [1] }
+  ],
+  "parGates": 0,
+  "hints": [
+    "No gates needed — just a single wire.",
+    "Click on port circles and drag to the destination port."
+  ]
+}

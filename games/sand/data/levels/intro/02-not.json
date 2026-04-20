@@ -1,0 +1,23 @@
+{
+  "id": "intro-not",
+  "track": "intro",
+  "order": 2,
+  "title": "The Inverter",
+  "brief": "Use a NOT gate to flip A: output 1 when A is 0, output 0 when A is 1.",
+  "difficulty": 1,
+  "prerequisites": ["intro-wire"],
+  "availableGates": ["NOT"],
+  "io": {
+    "inputs":  [{ "label": "A" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0], "out": [1] },
+    { "in": [1], "out": [0] }
+  ],
+  "parGates": 1,
+  "hints": [
+    "Drag a NOT from the palette onto the canvas.",
+    "Wire A → NOT → Y."
+  ]
+}

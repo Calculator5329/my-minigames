@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "tracks": [
+    { "id": "intro",       "title": "Intro",         "order": 1 },
+    { "id": "combo",       "title": "Combinational", "order": 2, "requires": "intro" },
+    { "id": "arithmetic",  "title": "Arithmetic",    "order": 3, "requires": "combo" },
+    { "id": "mux",         "title": "Multiplexing",  "order": 4, "requires": "arithmetic" },
+    { "id": "encoding",    "title": "Encoding",      "order": 5, "requires": "mux" },
+    { "id": "comparison",  "title": "Comparison",    "order": 6, "requires": "encoding" },
+    { "id": "sequential",  "title": "Sequential",    "order": 7, "requires": "comparison" },
+    { "id": "alu",         "title": "ALU",           "order": 8, "requires": "sequential" }
+  ]
+}

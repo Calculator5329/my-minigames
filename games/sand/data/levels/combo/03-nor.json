@@ -1,0 +1,22 @@
+{
+  "id": "combo-nor",
+  "track": "combo",
+  "order": 3,
+  "title": "NOR",
+  "brief": "NOR = NOT OR: 1 only when both A and B are 0.",
+  "difficulty": 2,
+  "prerequisites": ["combo-nand"],
+  "availableGates": ["NOR", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [1] },
+    { "in": [0, 1], "out": [0] },
+    { "in": [1, 0], "out": [0] },
+    { "in": [1, 1], "out": [0] }
+  ],
+  "parGates": 1,
+  "hints": ["Single NOR gate."]
+}

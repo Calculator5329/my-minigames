@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "levels": [
+    "intro/01-wire.json",
+    "intro/02-not.json",
+    "intro/03-and.json",
+    "combo/01-or.json",
+    "combo/02-nand.json",
+    "combo/03-nor.json"
+  ]
+}

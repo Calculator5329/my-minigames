@@ -1,0 +1,25 @@
+{
+  "id": "combo-nand",
+  "track": "combo",
+  "order": 2,
+  "title": "NAND",
+  "brief": "NAND = NOT AND: 0 only when both A and B are 1.",
+  "difficulty": 2,
+  "prerequisites": ["combo-or"],
+  "availableGates": ["NAND", "AND", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [1] },
+    { "in": [0, 1], "out": [1] },
+    { "in": [1, 0], "out": [1] },
+    { "in": [1, 1], "out": [0] }
+  ],
+  "parGates": 1,
+  "hints": [
+    "Single NAND gate (1 gate).",
+    "Or: AND followed by NOT (2 gates — only 2 stars)."
+  ]
+}
