@@ -316,8 +316,9 @@
         const y = gridTop + row * rowH - this.scroll;
         if (y > this.h || y + tileH < gridTop) continue;
         const r = { x, y, w: tileW, h: tileH };
-        this._drawTowerTile(ctx, game, key, def, r, i + 1);
-        this.hits.push({ rect: r, kind: 'buyTower', key: key });
+        const placedLocked = key === 'commander' && game.placedCommander;
+        this._drawTowerTile(ctx, game, key, def, r, i + 1, placedLocked);
+        if (!placedLocked) this.hits.push({ rect: r, kind: 'buyTower', key: key });
       }
       ctx.restore();
 
@@ -370,7 +371,7 @@
       }
     },
 
-    _drawTowerTile(ctx, game, key, def, r, hotkey) {
+    _drawTowerTile(ctx, game, key, def, r, hotkey, placedLocked) {
       const isHover = this._inRect(game._mx, game._my, r);
       const isPicked = game.placeKey === key;
       const unlocked = game.isTowerUnlocked
@@ -487,6 +488,22 @@
         ctx.fillRect(lx - lockBodyW / 2, ly - 3, lockBodyW, lockBodyH);
         ctx.fillStyle = '#08091a';
         ctx.fillRect(lx - 0.8, ly + 1, 1.6, tall ? 4 : 3);
+        ctx.restore();
+      }
+
+      // "PLACED" overlay (e.g. Commander once deployed — singleton hero)
+      if (placedLocked) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+        ctx.strokeStyle = COLORS.btnGreen;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+        ctx.fillStyle = COLORS.btnGreen;
+        ctx.font = 'bold 11px ui-sans-serif, system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('PLACED', r.x + r.w / 2, r.y + r.h / 2);
         ctx.restore();
       }
     },

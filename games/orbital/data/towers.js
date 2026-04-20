@@ -757,6 +757,51 @@
           ]
         }
       }
+    },
+
+    // ======== COMMANDER — auto-leveling hero (singleton) ========
+    commander: {
+      unlock: { round: 6 },
+      maxPerRun: 1,
+      hero: true,
+      base: {
+        name: 'Commander', short: 'Cmdr', cost: 850,
+        sprite: 'orb_turret_commander', color: '#4ade80',
+        range: 170, fireRate: 2.5, dmg: 6, pierce: 1,
+        projSpeed: 560, proj: 'bolt', priority: 'first',
+        desc: 'Auto-leveling hero. One per run.'
+      },
+      paths: {
+        A: {
+          id: 'tactician', name: 'Tactician', accent: '#4ade80',
+          tiers: [
+            { cost: 400, label: 'Rally', desc: '+8% fire rate aura',
+              glyph: 'aura', patch: { towerBuffFire: 0.08 } },
+            { cost: 600, label: 'Long View', desc: '+40 range',
+              glyph: 'range', patch: { range: 210 } },
+            { cost: 1100, label: 'Marked', desc: 'enemies in aura take +15% dmg',
+              glyph: 'crit', patch: { towerBuffFire: 0.10, debuffDmg: 0.15 } },
+            { cost: 3200, label: 'Stand Fast', desc: 'fire-rate +100% nearby 8s',
+              glyph: 'star',
+              patch: { towerBuffFire: 0.12, debuffDmg: 0.18 },
+              ability: 'standFast' }
+          ]
+        },
+        B: {
+          id: 'gunner', name: 'Gunner', accent: '#ffd86b',
+          tiers: [
+            { cost: 350, label: 'Heavy Rounds', desc: '+3 dmg',
+              glyph: 'dmg', patch: { dmg: 9 } },
+            { cost: 550, label: 'Fast Trigger', desc: '+2 fire rate',
+              glyph: 'rate', patch: { fireRate: 4.5 } },
+            { cost: 1000, label: 'Anti-Armor', desc: 'pierces armor',
+              glyph: 'shield', patch: { antiArmor: true, dmg: 12 } },
+            { cost: 2800, label: 'Barrage', desc: '20-round rapid salvo',
+              glyph: 'burst', patch: { fireRate: 6, dmg: 15 },
+              ability: 'heroBarrage' }
+          ]
+        }
+      }
     }
   };
 

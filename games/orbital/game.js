@@ -98,6 +98,7 @@
       this.waveTimer = 0;
       this.selectedTower = null;
       this.placeKey = null;
+      this.placedCommander = false;
       this.hoverPlace = null;
       this.messages = [];
       this.floaters = [];
@@ -198,11 +199,22 @@
           this.placeKey = null;
           return;
         }
+        if (this.placeKey === 'commander' && this.placedCommander) {
+          this.flashMessage('COMMANDER ALREADY DEPLOYED', '#ff5566');
+          this.placeKey = null;
+          return;
+        }
         if (this.canPlaceAt(mx, my)) {
-          const def = O.Towers.get(this.placeKey).base;
+          const key = this.placeKey;
+          const def = O.Towers.get(key).base;
           this.spendCash(def.cost);
-          const tower = O.Upgrades.newPlacedTower(this.placeKey, mx, my, this.time);
+          const tower = O.Upgrades.newPlacedTower(key, mx, my, this.time);
           this.towers.push(tower);
+          if (key === 'commander') {
+            this.placedCommander = true;
+            tower.placedRound = this.round;
+            tower.heroLevel = 1;
+          }
           this.sfx.play('place');
           this.spark(mx, my, 18, def.color);
           this.placeKey = null;
@@ -299,6 +311,12 @@
       // top of that based on this.freeplayLevel.
       if (this.mode === 'campaign' && this.round >= this.maxRound) return;
       this.round++;
+      for (const t of this.towers) {
+        if (t.key !== 'commander') continue;
+        const elapsed = this.round - (t.placedRound || this.round);
+        t.heroLevel = Math.min(8, 1 + Math.floor(elapsed / 3));
+        t.level = t.heroLevel;
+      }
       if (this.mode === 'freeplay') {
         this.freeplayLevel = this.round - this.maxRound;
       }
@@ -782,7 +800,10 @@
     // -------------------------------------------------------------
     buffsForTower(t) {
       // Sum support resonance + chrono buff. Apply XP scaling.
-      const lvlMul = O.XP.statMul(t.level || 1);
+      const lvl = t.level || 1;
+      const lvlMul = t.key === 'commander'
+        ? { range: 1 + 0.04 * (lvl - 1), dmg: 1 + 0.10 * (lvl - 1), rate: 1 + 0.05 * (lvl - 1) }
+        : O.XP.statMul(lvl);
       let fireMul = lvlMul.rate;
       let dmgMul  = lvlMul.dmg;
       let rangeMul = lvlMul.range;

@@ -325,6 +325,43 @@
       }
     },
 
+    // ---- COMMANDER ----
+    standFast: {
+      label: 'Stand Fast', desc: '+100% rate on nearby towers, 8s',
+      cd: 40, glyph: 'aura', color: '#4ade80',
+      activate(g, t) {
+        t.abilityFx.standFast = 8.0;
+        g.flashMessage('STAND FAST', '#4ade80');
+      },
+      tick(g, t, dt) {
+        if (t.abilityFx.standFast) {
+          t.abilityFx.standFast = Math.max(0, t.abilityFx.standFast - dt);
+        }
+      }
+    },
+    heroBarrage: {
+      label: 'Barrage', desc: '20 rapid bolts at the leading enemy',
+      cd: 35, glyph: 'burst', color: '#ffd86b',
+      activate(g, t) {
+        let lead = null, ld = -Infinity;
+        for (const e of g.enemies) if (e.pathS > ld) { lead = e; ld = e.pathS; }
+        if (!lead) return;
+        for (let i = 0; i < 20; i++) {
+          setTimeout(() => {
+            if (!g.enemies.includes(lead)) return;
+            const ang = Math.atan2(lead.y - t.y, lead.x - t.x) + (Math.random() - 0.5) * 0.15;
+            g.projectiles.push({
+              x: t.x, y: t.y,
+              vx: Math.cos(ang) * 640, vy: Math.sin(ang) * 640,
+              dmg: 18, pierce: 2, life: 1.2, type: 'bolt', fromTower: t,
+              color: '#ffd86b'
+            });
+          }, i * 50);
+        }
+        g.flashMessage('BARRAGE', '#ffd86b');
+      }
+    },
+
     // ---- PARAGONS ----
     paragonBoltStorm: {
       label: 'Bolt Storm', desc: '40 bolts in a fan',

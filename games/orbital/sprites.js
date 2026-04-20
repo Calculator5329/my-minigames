@@ -889,6 +889,11 @@
     .replace(/#4fc8ff/g, '#a070ff')
     .replace(/#d8faff/g, '#e8d8ff');
 
+  S.turret_commander = S.turret_dart
+    .replace(/#7ae0ff/g, '#4ade80')
+    .replace(/#4fc8ff/g, '#16c060')
+    .replace(/#d8faff/g, '#c8f4d4');
+
   // ==================================================================
   //  Registry
   // ==================================================================
