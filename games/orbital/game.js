@@ -1683,13 +1683,34 @@
       const kick = recoil * 5;
       const dx = symmetric ? 0 : -Math.cos(t.angle) * kick;
       const dy = symmetric ? 0 : -Math.sin(t.angle) * kick;
-      Assets.draw(ctx, def.sprite, t.x + dx, t.y + dy, 48, 48, {
+      if (t.paragon) {
+        const accent = t.paragonAccent || '#ffd86b';
+        const pulse = 0.5 + 0.5 * Math.sin(this.time * 3);
+        ctx.save();
+        ctx.globalAlpha = 0.18 + 0.22 * pulse;
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 36 + pulse * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      const sz = t.paragon ? 62 : 48;
+      Assets.draw(ctx, def.sprite, t.x + dx, t.y + dy, sz, sz, {
         rot,
         fallback: () => {
           ctx.fillStyle = def.color || '#888';
-          ctx.fillRect(t.x - 14, t.y - 14, 28, 28);
+          ctx.fillRect(t.x - sz/2 + 10, t.y - sz/2 + 10, sz - 20, sz - 20);
         }
       });
+      if (t.paragon) {
+        const accent = t.paragonAccent || '#ffd86b';
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = accent;
+        ctx.fillRect(t.x - sz/2, t.y - sz/2, sz, sz);
+        ctx.restore();
+      }
       // Buffed glow
       const buffs = this.buffsForTower(t);
       if (buffs.fireMul > 1.05 || buffs.dmgMul > 1.05) {
