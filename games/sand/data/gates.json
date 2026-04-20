@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "primitives": {
+    "NOT":    { "inputs": ["a"],        "outputs": ["y"], "kind": "combo" },
+    "AND":    { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "OR":     { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "NAND":   { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "NOR":    { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "XOR":    { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "XNOR":   { "inputs": ["a","b"],    "outputs": ["y"], "kind": "combo" },
+    "INPUT":  { "inputs": [],           "outputs": ["y"], "kind": "io", "io": "in"  },
+    "OUTPUT": { "inputs": ["a"],        "outputs": [],    "kind": "io", "io": "out" },
+    "CLOCK":  { "inputs": [],           "outputs": ["y"], "kind": "io", "io": "clk" },
+    "CONST0": { "inputs": [],           "outputs": ["y"], "kind": "const", "value": 0 },
+    "CONST1": { "inputs": [],           "outputs": ["y"], "kind": "const", "value": 1 }
+  }
+}
