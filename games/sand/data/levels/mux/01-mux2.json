@@ -1,0 +1,30 @@
+{
+  "id": "mux-mux2",
+  "track": "mux",
+  "order": 1,
+  "title": "2:1 Mux",
+  "brief": "Select A when Sel=0, B when Sel=1.",
+  "difficulty": 2,
+  "prerequisites": ["arithmetic-4bit-adder"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }, { "label": "Sel" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0], "out": [0] },
+    { "in": [1, 0, 0], "out": [1] },
+    { "in": [0, 1, 0], "out": [0] },
+    { "in": [1, 1, 0], "out": [1] },
+    { "in": [0, 0, 1], "out": [0] },
+    { "in": [1, 0, 1], "out": [0] },
+    { "in": [0, 1, 1], "out": [1] },
+    { "in": [1, 1, 1], "out": [1] }
+  ],
+  "parGates": 4,
+  "unlocksComponent": { "id": "mux2", "name": "2:1 Mux" },
+  "hints": [
+    "Y = (A AND NOT Sel) OR (B AND Sel).",
+    "That's 2 AND, 1 OR, 1 NOT = 4 gates."
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "arithmetic-4bit-adder",
+  "track": "arithmetic",
+  "order": 4,
+  "title": "4-Bit Adder",
+  "brief": "Add two 4-bit numbers (A = A3..A0, B = B3..B0) producing a 4-bit Sum and Cout.",
+  "difficulty": 4,
+  "prerequisites": ["arithmetic-fulladder"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "full_adder"],
+  "io": {
+    "inputs":  [
+      { "label": "A3" }, { "label": "A2" }, { "label": "A1" }, { "label": "A0" },
+      { "label": "B3" }, { "label": "B2" }, { "label": "B1" }, { "label": "B0" }
+    ],
+    "outputs": [
+      { "label": "S3" }, { "label": "S2" }, { "label": "S1" }, { "label": "S0" },
+      { "label": "Cout" }
+    ]
+  },
+  "truthTable": [
+    { "in": [0,0,0,0, 0,0,0,0], "out": [0,0,0,0, 0] },
+    { "in": [0,0,0,1, 0,0,0,1], "out": [0,0,1,0, 0] },
+    { "in": [0,0,1,0, 0,0,0,1], "out": [0,0,1,1, 0] },
+    { "in": [0,1,0,1, 0,0,1,1], "out": [1,0,0,0, 0] },
+    { "in": [1,0,0,0, 1,0,0,0], "out": [0,0,0,0, 1] },
+    { "in": [1,1,1,1, 0,0,0,1], "out": [0,0,0,0, 1] },
+    { "in": [1,1,1,1, 1,1,1,1], "out": [1,1,1,0, 1] },
+    { "in": [0,1,1,0, 0,0,0,1], "out": [0,1,1,1, 0] }
+  ],
+  "parGates": 4,
+  "unlocksComponent": { "id": "adder4", "name": "4-Bit Adder" },
+  "hints": [
+    "Chain 4 full_adder tiles. Feed the first Cin as 0; ripple each Cout into the next Cin."
+  ]
+}

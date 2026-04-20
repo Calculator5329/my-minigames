@@ -1,0 +1,30 @@
+{
+  "id": "arithmetic-fulladder",
+  "track": "arithmetic",
+  "order": 3,
+  "title": "Full Adder",
+  "brief": "Add three 1-bit values (A, B, Cin) to produce Sum (S) and Carry (Cout).",
+  "difficulty": 3,
+  "prerequisites": ["arithmetic-xor"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "half_adder"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }, { "label": "Cin" }],
+    "outputs": [{ "label": "S" }, { "label": "Cout" }]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0], "out": [0, 0] },
+    { "in": [0, 0, 1], "out": [1, 0] },
+    { "in": [0, 1, 0], "out": [1, 0] },
+    { "in": [0, 1, 1], "out": [0, 1] },
+    { "in": [1, 0, 0], "out": [1, 0] },
+    { "in": [1, 0, 1], "out": [0, 1] },
+    { "in": [1, 1, 0], "out": [0, 1] },
+    { "in": [1, 1, 1], "out": [1, 1] }
+  ],
+  "parGates": 2,
+  "unlocksComponent": { "id": "full_adder", "name": "Full Adder" },
+  "hints": [
+    "Two half-adders + an OR: first half-adder combines A and B; second combines that sum with Cin.",
+    "Cout is OR of the two half-adder carries."
+  ]
+}

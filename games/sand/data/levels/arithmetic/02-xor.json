@@ -1,0 +1,25 @@
+{
+  "id": "arithmetic-xor",
+  "track": "arithmetic",
+  "order": 2,
+  "title": "Exclusive Or",
+  "brief": "Output 1 when exactly one input is 1. Build XOR from AND/OR/NOT.",
+  "difficulty": 2,
+  "prerequisites": ["arithmetic-halfadder"],
+  "availableGates": ["AND", "OR", "NOT", "NAND", "NOR"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [0] },
+    { "in": [0, 1], "out": [1] },
+    { "in": [1, 0], "out": [1] },
+    { "in": [1, 1], "out": [0] }
+  ],
+  "parGates": 4,
+  "unlocksComponent": { "id": "xor", "name": "XOR" },
+  "hints": [
+    "(A AND NOT B) OR (NOT A AND B) — 4 gates without XOR primitive."
+  ]
+}

@@ -6,6 +6,13 @@
     "intro/03-and.json",
     "combo/01-or.json",
     "combo/02-nand.json",
-    "combo/03-nor.json"
+    "combo/03-nor.json",
+    "arithmetic/01-halfadder.json",
+    "arithmetic/02-xor.json",
+    "arithmetic/03-fulladder.json",
+    "arithmetic/04-4bit-adder.json",
+    "mux/01-mux2.json",
+    "mux/02-mux4.json",
+    "mux/03-demux4.json"
   ]
 }

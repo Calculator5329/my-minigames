@@ -1,0 +1,26 @@
+{
+  "id": "arithmetic-halfadder",
+  "track": "arithmetic",
+  "order": 1,
+  "title": "Half Adder",
+  "brief": "Compute Sum (S) and Carry (Cout) of A + B.",
+  "difficulty": 2,
+  "prerequisites": ["combo-nor"],
+  "availableGates": ["AND", "OR", "NOT", "NAND", "NOR"],
+  "io": {
+    "inputs":  [{ "label": "A" }, { "label": "B" }],
+    "outputs": [{ "label": "S" }, { "label": "Cout" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [0, 0] },
+    { "in": [0, 1], "out": [1, 0] },
+    { "in": [1, 0], "out": [1, 0] },
+    { "in": [1, 1], "out": [0, 1] }
+  ],
+  "parGates": 5,
+  "unlocksComponent": { "id": "half_adder", "name": "Half Adder" },
+  "hints": [
+    "S = A XOR B. Build XOR from AND/OR/NOT — or just: (A OR B) AND NOT(A AND B).",
+    "Cout = A AND B."
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "mux-mux4",
+  "track": "mux",
+  "order": 2,
+  "title": "4:1 Mux",
+  "brief": "Select one of four inputs (A, B, C, D) using 2-bit Sel (S1, S0).",
+  "difficulty": 3,
+  "prerequisites": ["mux-mux2"],
+  "availableGates": ["AND", "OR", "NOT", "mux2"],
+  "io": {
+    "inputs":  [
+      { "label": "A" }, { "label": "B" }, { "label": "C" }, { "label": "D" },
+      { "label": "S1" }, { "label": "S0" }
+    ],
+    "outputs": [{ "label": "Y" }]
+  },
+  "truthTable": [
+    { "in": [1,0,0,0, 0,0], "out": [1] },
+    { "in": [0,1,0,0, 0,0], "out": [0] },
+    { "in": [0,1,0,0, 0,1], "out": [1] },
+    { "in": [0,0,1,0, 0,1], "out": [0] },
+    { "in": [0,0,1,0, 1,0], "out": [1] },
+    { "in": [0,0,0,1, 1,0], "out": [0] },
+    { "in": [0,0,0,1, 1,1], "out": [1] },
+    { "in": [1,1,1,1, 1,1], "out": [1] },
+    { "in": [0,0,0,0, 0,0], "out": [0] }
+  ],
+  "parGates": 3,
+  "unlocksComponent": { "id": "mux4", "name": "4:1 Mux" },
+  "hints": [
+    "Three 2:1 muxes: two pick pairs using S0, final mux picks between them using S1."
+  ]
+}

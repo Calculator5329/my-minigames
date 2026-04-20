@@ -1,0 +1,30 @@
+{
+  "id": "mux-demux4",
+  "track": "mux",
+  "order": 3,
+  "title": "1:4 Demux",
+  "brief": "Route input D to one of four outputs (Y0..Y3) selected by (S1, S0).",
+  "difficulty": 3,
+  "prerequisites": ["mux-mux4"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "D" }, { "label": "S1" }, { "label": "S0" }],
+    "outputs": [
+      { "label": "Y0" }, { "label": "Y1" }, { "label": "Y2" }, { "label": "Y3" }
+    ]
+  },
+  "truthTable": [
+    { "in": [1, 0, 0], "out": [1, 0, 0, 0] },
+    { "in": [1, 0, 1], "out": [0, 1, 0, 0] },
+    { "in": [1, 1, 0], "out": [0, 0, 1, 0] },
+    { "in": [1, 1, 1], "out": [0, 0, 0, 1] },
+    { "in": [0, 0, 0], "out": [0, 0, 0, 0] },
+    { "in": [0, 1, 1], "out": [0, 0, 0, 0] }
+  ],
+  "parGates": 8,
+  "unlocksComponent": { "id": "demux4", "name": "1:4 Demux" },
+  "hints": [
+    "Y0 = D AND NOT S1 AND NOT S0. Y1 = D AND NOT S1 AND S0. Y2 = D AND S1 AND NOT S0. Y3 = D AND S1 AND S0.",
+    "Two NOTs + 4 three-input ANDs (each three-input AND = 2 two-input ANDs) = 10. Par is 8 assuming shared inverters."
+  ]
+}
