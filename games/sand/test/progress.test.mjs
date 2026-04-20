@@ -1,83 +1,60 @@
-// games/sand/test/progress.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import mod from '../lib/progress.js';
+const { Progress } = mod;
 
-const require = createRequire(import.meta.url);
-const { Progress } = require('../lib/progress.js');
-
-function makeStubStorage() {
-  const store = {};
+function mkStore(initial) {
+  let data = initial === undefined ? null : initial;
   return {
-    getGameData(id) {
-      return store[id] ? JSON.parse(JSON.stringify(store[id])) : {};
-    },
-    setGameData(id, obj) {
-      store[id] = JSON.parse(JSON.stringify(obj || {}));
-    },
-    mergeGameData(id, patch) {
-      const prev = store[id] || {};
-      store[id] = Object.assign({}, prev, patch || {});
-      return JSON.parse(JSON.stringify(store[id]));
-    },
-    _dump() { return JSON.parse(JSON.stringify(store)); },
+    getGameData: () => data,
+    setGameData: (_id, d) => { data = d; },
+    peek: () => data
   };
 }
 
-test('isSolved is false initially', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  assert.equal(Progress.isSolved(p, 'L1_not'), false);
-  assert.equal(Progress.getStars(p, 'L1_not'), 0);
+test('progress: wipes when version missing or old', () => {
+  const s = mkStore({ version: 1, stars: { foo: 3 } });
+  Progress.bindStorage(s);
+  const d = Progress.loadSave();
+  assert.equal(d.version, 2);
+  assert.deepEqual(d.stars, {});
+  assert.equal(d.announceReset, true);
 });
 
-test('recordSolve stores stars and is readable by isSolved/getStars', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  Progress.recordSolve(p, 'L1_not', { stars: 2, gates: 4, ticks: 6 });
-  assert.equal(Progress.isSolved(p, 'L1_not'), true);
-  assert.equal(Progress.getStars(p, 'L1_not'), 2);
+test('progress: recordSolve takes max', () => {
+  const s = mkStore();
+  Progress.bindStorage(s);
+  Progress.loadSave();
+  Progress.recordSolve('a', 2);
+  Progress.recordSolve('a', 1);
+  assert.equal(Progress.starsFor('a'), 2);
+  Progress.recordSolve('a', 3);
+  assert.equal(Progress.starsFor('a'), 3);
 });
 
-test('best stars kept when re-solving with lower stars', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  Progress.recordSolve(p, 'L1_not', { stars: 3, gates: 2, ticks: 2 });
-  Progress.recordSolve(p, 'L1_not', { stars: 1, gates: 10, ticks: 12 });
-  assert.equal(Progress.getStars(p, 'L1_not'), 3);
+test('progress: unlock + isUnlocked round-trip', () => {
+  const s = mkStore();
+  Progress.bindStorage(s);
+  Progress.loadSave();
+  assert.equal(Progress.isUnlocked('half_adder'), false);
+  Progress.unlock('half_adder');
+  assert.equal(Progress.isUnlocked('half_adder'), true);
 });
 
-test('recordSolve with unlocksComponent adds to unlockedComponents', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  const comp = { id: 'NOT', name: 'NOT gate' };
-  Progress.recordSolve(p, 'L1_not', { stars: 3, gates: 2, ticks: 2 }, { unlocksComponent: comp });
-  const list = Progress.unlockedComponents(p);
-  assert.equal(list.length, 1);
-  assert.equal(list[0].id, 'NOT');
-  // Re-record doesn't duplicate.
-  Progress.recordSolve(p, 'L1_not', { stars: 3, gates: 2, ticks: 2 }, { unlocksComponent: comp });
-  assert.equal(Progress.unlockedComponents(p).length, 1);
+test('progress: consumeReset fires exactly once', () => {
+  const s = mkStore({ version: 1 });
+  Progress.bindStorage(s);
+  Progress.loadSave();
+  assert.equal(Progress.consumeReset(), true);
+  assert.equal(Progress.consumeReset(), false);
 });
 
-test('savedCircuits add/list round-trip', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  assert.deepEqual(Progress.savedCircuits(p), []);
-  Progress.addSavedCircuit(p, { id: 'c1', name: 'my NOT', graph: { nodes: {}, wires: {} } });
-  Progress.addSavedCircuit(p, { id: 'c2', name: 'my AND', graph: { nodes: {}, wires: {} } });
-  const list = Progress.savedCircuits(p);
-  assert.equal(list.length, 2);
-  assert.equal(list[0].id, 'c1');
-  assert.equal(list[1].name, 'my AND');
-});
-
-test('updateSettings merges', () => {
-  const storage = makeStubStorage();
-  const p = Progress.init({ storage });
-  Progress.updateSettings(p, { grid: true });
-  Progress.updateSettings(p, { snap: 8 });
-  const s = Progress.settings(p);
-  assert.equal(s.grid, true);
-  assert.equal(s.snap, 8);
+test('progress: totalStars sums correctly', () => {
+  const s = mkStore();
+  Progress.bindStorage(s);
+  Progress.loadSave();
+  Progress.recordSolve('a', 3);
+  Progress.recordSolve('b', 2);
+  Progress.recordSolve('c', 1);
+  assert.equal(Progress.totalStars(), 6);
 });
