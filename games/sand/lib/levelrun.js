@@ -1,127 +1,82 @@
-// games/sand/lib/levelrun.js
-// Dual-entry module: Node (CommonJS) and browser (window.NDP.Sand.LevelRun).
-//
-// Task 11: truth-table test runner.
-// Task 12: star scorer.
-//
-// LevelRun.test drives a graph through each row of a levelSpec truth table
-// and reports per-row pass/fail plus aggregated settled/conflicts data.
-// LevelRun.score turns a test result + caller-supplied gate/tick analysis
-// into a 0-3 star rating according to levelSpec.starGoals thresholds.
-
 (function (root, factory) {
-  const mod = factory(root);
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { LevelRun: mod.LevelRun };
-  }
+  const mod = factory();
+  if (typeof module !== 'undefined' && module.exports) module.exports = mod;
   if (typeof window !== 'undefined') {
     window.NDP = window.NDP || {};
     window.NDP.Sand = window.NDP.Sand || {};
-    window.NDP.Sand.LevelRun = mod.LevelRun;
+    window.NDP.Sand.Levelrun = mod.Levelrun;
   }
-})(typeof self !== 'undefined' ? self : this, function (root) {
-  let Sim;
-  if (typeof module !== 'undefined' && module.exports) {
-    Sim = require('./sim.js').Sim;
-  } else if (root && root.NDP && root.NDP.Sand) {
-    Sim = root.NDP.Sand.Sim;
-  }
+})(typeof self !== 'undefined' ? self : this, function () {
 
-  function arraysEqual(a, b) {
-    if (!a || !b) return false;
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if ((a[i] | 0) !== (b[i] | 0)) return false;
+  function normalizeIn(row, level) {
+    if (Array.isArray(row.in)) {
+      const out = {};
+      level.io.inputs.forEach((p, i) => { out[p.label] = row.in[i] | 0; });
+      return out;
     }
-    return true;
-  }
-
-  function test(graph, levelSpec, opts) {
-    opts = opts || {};
-    const maxTicks = typeof opts.maxTicks === 'number' ? opts.maxTicks : 64;
-    const registry = opts.componentRegistry || null;
-
-    const inputs = (levelSpec.io && levelSpec.io.inputs) || [];
-    const outputs = (levelSpec.io && levelSpec.io.outputs) || [];
-    const table = levelSpec.truthTable || [];
-
-    const runner = Sim.create(graph, { componentRegistry: registry });
-
-    const rows = [];
-    const conflicts = [];
-    let allSettled = true;
-    let firstFailure = -1;
-
-    for (let i = 0; i < table.length; i++) {
-      const row = table[i];
-      runner.reset();
-      for (let k = 0; k < inputs.length; k++) {
-        runner.setInput(inputs[k], row.in[k]);
-      }
-      const r = runner.run({ maxTicks });
-      const actual = {};
-      const expected = {};
-      const actualArr = [];
-      const expectedArr = [];
-      for (let k = 0; k < outputs.length; k++) {
-        const label = outputs[k];
-        const v = runner.readOutput(label);
-        actual[label] = v;
-        actualArr.push(v);
-        expected[label] = row.out[k];
-        expectedArr.push(row.out[k]);
-      }
-      const match = arraysEqual(actualArr, expectedArr);
-      if (!match && firstFailure === -1) firstFailure = i;
-      if (!r.settled) allSettled = false;
-      if (r.conflicts && r.conflicts.length) {
-        for (const c of r.conflicts) conflicts.push(c);
-      }
-
-      const inputsMap = {};
-      for (let k = 0; k < inputs.length; k++) inputsMap[inputs[k]] = row.in[k];
-
-      rows.push({
-        inputs: inputsMap,
-        expected,
-        actual,
-        settled: !!r.settled,
-        ticks: r.tick | 0,
-        match,
-      });
+    if (row.in && typeof row.in === 'object') {
+      const out = {};
+      for (const p of level.io.inputs) out[p.label] = (row.in[p.label] | 0);
+      if ('__clk' in row.in) out.__clk = row.in.__clk;
+      return out;
     }
-
-    const passed = firstFailure === -1 && rows.length > 0;
-    return {
-      passed,
-      rows,
-      firstFailure,
-      settled: allSettled,
-      conflicts,
-    };
+    return {};
   }
 
-  function starFor(value, goals) {
-    if (!goals) return 1;
-    if (typeof goals['3star'] === 'number' && value <= goals['3star']) return 3;
-    if (typeof goals['2star'] === 'number' && value <= goals['2star']) return 2;
-    return 1;
-  }
-
-  function score(result, analysis, levelSpec) {
-    if (!result || !result.passed) {
-      return { stars: 0, gatesStar: 1, ticksStar: 1 };
+  function normalizeOut(row, level) {
+    if (Array.isArray(row.out)) {
+      const out = {};
+      level.io.outputs.forEach((p, i) => { out[p.label] = row.out[i] | 0; });
+      return out;
     }
-    const goals = (levelSpec && levelSpec.starGoals) || {};
-    const gates = (analysis && analysis.gates) | 0;
-    const ticks = (analysis && analysis.ticks) | 0;
-    const gatesStar = starFor(gates, goals.gates);
-    const ticksStar = starFor(ticks, goals.ticks);
-    let stars = Math.min(gatesStar, ticksStar);
-    if (stars < 1) stars = 1;
-    return { stars, gatesStar, ticksStar };
+    if (row.out && typeof row.out === 'object') {
+      const out = {};
+      for (const p of level.io.outputs) out[p.label] = (row.out[p.label] | 0);
+      return out;
+    }
+    return {};
   }
 
-  const LevelRun = { test, score };
-  return { LevelRun };
+  function run(opts) {
+    const { circuit, level, Sim } = opts;
+    const rowsTotal = (level.truthTable || []).length;
+    let graph;
+    try { graph = Sim.build(circuit); }
+    catch (e) { return { pass: false, rowsPassed: 0, rowsTotal, firstFail: { row: 0, error: String(e && e.message || e) } }; }
+
+    let clkState = 0;
+    for (let i = 0; i < rowsTotal; i++) {
+      const row = level.truthTable[i];
+      const rin = normalizeIn(row, level);
+      const expected = normalizeOut(row, level);
+      let got;
+      const clkTok = rin.__clk;
+      if (level.sequential === true || typeof clkTok === 'string') {
+        if (clkTok === 'stay') {
+          const inputs = Object.assign({}, rin, { __clk: clkState });
+          got = Sim.tick(graph, inputs);
+        } else {
+          // Default to rising edge for sequential rows.
+          const inputs0 = Object.assign({}, rin, { __clk: 0 });
+          Sim.tick(graph, inputs0);
+          const inputs1 = Object.assign({}, rin, { __clk: 1 });
+          got = Sim.tick(graph, inputs1);
+          clkState = 1;
+        }
+      } else {
+        const inputs = Object.assign({}, rin);
+        delete inputs.__clk;
+        got = Sim.tick(graph, inputs);
+      }
+      // Compare every expected output label.
+      for (const k of Object.keys(expected)) {
+        if ((got[k] | 0) !== (expected[k] | 0)) {
+          return { pass: false, rowsPassed: i, rowsTotal, firstFail: { row: i, expected, got } };
+        }
+      }
+    }
+    return { pass: true, rowsPassed: rowsTotal, rowsTotal };
+  }
+
+  return { Levelrun: { run } };
 });
