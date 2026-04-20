@@ -76,13 +76,21 @@
     grid.innerHTML = '';
     cardCanvases.length = 0;
     /* Sort by most-played (desc), ties broken by most-recently-played, then
-       by original registration order. Games never played sit at the bottom in
-       their registration order so the grid isn't reshuffled on first visit. */
+       by a curated default order (featured games first), then by original
+       registration order. Games never played sit at the bottom behind the
+       curated featured set so the grid isn't reshuffled on first visit. */
+    const FEATURED_ORDER = ['orbital','switchboard','vaultbreaker','starfall','franchise','asteroids','reactor','ricochet'];
+    const featuredRank = id => {
+      const i = FEATURED_ORDER.indexOf(id);
+      return i < 0 ? Infinity : i;
+    };
     const sorted = NDP.games.slice().sort((a, b) => {
       const sa = Storage.getGameStats(a.id);
       const sb = Storage.getGameStats(b.id);
       if (sb.plays !== sa.plays) return (sb.plays | 0) - (sa.plays | 0);
       if (sb.lastPlayed !== sa.lastPlayed) return (sb.lastPlayed | 0) - (sa.lastPlayed | 0);
+      const fr = featuredRank(a.id) - featuredRank(b.id);
+      if (fr !== 0) return fr;
       return NDP.games.indexOf(a) - NDP.games.indexOf(b);
     });
     sorted.forEach(manifest => {

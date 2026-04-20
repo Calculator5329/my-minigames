@@ -19,3 +19,6 @@ Thumbs.db
 # Game-folder PNGs (under games/<id>/ and assets/) stay tracked.
 /*.png
 firebase-debug*.log
+
+# Local backup of pre-Cascadia voice bakes — not shipped.
+assets/switchboard/voices_pre_cascadia/

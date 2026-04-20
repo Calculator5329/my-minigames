@@ -59,25 +59,39 @@ function strArg(name) {
 
 /* Per-provider voice/voiceId map. The OpenRouter `voice` is whatever the
    underlying OpenAI gpt-audio model accepts. We then pass per-character
-   direction notes via the system prompt. */
+   direction notes via the system prompt.
+
+   Hotel Cascadia cast (per docs/plans/2026-04-19-cascadia.md § Cast):
+     kestral     — Mrs. Kestral, room 412   (elderly, kind)
+     ashworth    — Mr. Ashworth, room 88    (businessman, polite)
+     pryce       — Dr. Pryce, room 1102     (clinical, calm)
+     bellhop     — The Bellhop              (calm, then only inhale)
+     houseman    — The Houseman             (flat inventory bleed)
+     child312    — The Child in 312         (a 9-year-old with a man's voice)
+     replacement — The Replacement          (22-year-old new operator)
+     architect   — Auber Quint              (the dead architect, slow)
+
+   The masculine slot deliberately lands on child312 — the lore is that her
+   reset rolled her body back further than her mind and her voice never
+   came along. The mismatched voice IS the horror. */
 const VOICE_MAP = {
   openrouter: {
-    halberd:'shimmer', child:'nova', crane:'onyx', doctor:'echo',
-    weatherman:'fable', you:'alloy', grocer:'onyx', cabbie:'nova',
-    ma:'shimmer', receptionist:'alloy', operator2:'shimmer', stranger:'echo'
+    kestral: 'shimmer', ashworth: 'onyx',  pryce:    'echo',  bellhop: 'fable',
+    houseman: 'echo',   child312: 'onyx',  replacement: 'alloy', architect: 'echo'
   },
   openai: {
-    halberd:'shimmer', child:'nova', crane:'onyx', doctor:'echo',
-    weatherman:'fable', you:'alloy', grocer:'onyx', cabbie:'nova',
-    ma:'shimmer', receptionist:'alloy', operator2:'shimmer', stranger:'echo'
+    kestral: 'shimmer', ashworth: 'onyx',  pryce:    'echo',  bellhop: 'fable',
+    houseman: 'echo',   child312: 'onyx',  replacement: 'alloy', architect: 'echo'
   },
   elevenlabs: {
-    halberd: 'EXAVITQu4vr4xnSDxMaL', child: 'jsCqWAovK2LkecY7zXl4',
-    crane:   'VR6AewLTigWG4xSOukaG', doctor: 'onwK4e9ZLuTAKqWW03F9',
-    weatherman: 'CYw3kZ02Hs0563khs1Fj', you: 'pNInz6obpgDQGcFmaJgB',
-    grocer:  'TxGEqnHWrfWFTfGW9XjX', cabbie: 'AZnzlk1XvdvUeBnXmlld',
-    ma:      'ThT5KcBeYPX3keUQqHPh', receptionist: 'XB0fDUnXU5powFXDhCwa',
-    operator2: 'EXAVITQu4vr4xnSDxMaL', stranger: 'onwK4e9ZLuTAKqWW03F9'
+    kestral:    'EXAVITQu4vr4xnSDxMaL',
+    ashworth:   'VR6AewLTigWG4xSOukaG',
+    pryce:      'onwK4e9ZLuTAKqWW03F9',
+    bellhop:    'CYw3kZ02Hs0563khs1Fj',
+    houseman:   'TxGEqnHWrfWFTfGW9XjX',
+    child312:   'AZnzlk1XvdvUeBnXmlld',
+    replacement:'XB0fDUnXU5powFXDhCwa',
+    architect:  'pNInz6obpgDQGcFmaJgB'
   }
 };
 
@@ -116,17 +130,24 @@ function parseContent() {
       const voice = cm[1];
       const text = unescape(cm[2]);
       const isDead = !!cm[3];
-      out.push({
-        id: `n${nightId}_c${idx}`,
-        night: nightId, voice, text, isDead
-      });
-      if (isDead && WHISPERS) {
+      // Skip "empty" lines — bellhop dead-socket calls in Hotel Cascadia
+      // use text:'...' as a signal that this lamp rings without a voice
+      // (the right play is to let it ring out). The runtime never plays
+      // their audio, so don't burn API quota baking them.
+      const isVoiceless = !text || text.replace(/[^A-Za-z0-9]/g, '').length === 0;
+      if (!isVoiceless) {
         out.push({
-          id: `whisper_n${nightId}_c${idx}`,
-          night: nightId, voice, text, isWhisper: true
+          id: `n${nightId}_c${idx}`,
+          night: nightId, voice, text, isDead
         });
+        if (isDead && WHISPERS) {
+          out.push({
+            id: `whisper_n${nightId}_c${idx}`,
+            night: nightId, voice, text, isWhisper: true
+          });
+        }
       }
-      idx++;
+      idx++;                // index keeps advancing so runtime IDs stay aligned
     }
   }
 
@@ -169,7 +190,7 @@ function parseContent() {
       while ((lm = lineRE.exec(bm[2]))) {
         out.push({
           id: `ending_${key}_${i++}`,
-          night: 5, voice: 'you', text: unescape(lm[1])
+          night: 5, voice: 'replacement', text: unescape(lm[1])
         });
       }
     }
@@ -185,6 +206,15 @@ function unescape(s) {
 // Loose comparison so we only flag real drift, not punctuation/case nits.
 function normalize(s) {
   return s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Detect compliance-reply contamination — "Understood. I'll deliver…" etc.
+// These takes have the framing baked into the audio and must be re-rolled.
+const FRAMING_PREFIX = /^(?:["'\s]*)(understood|sure|of course|here(?:'| i)s|i'?ll|i will|okay|ok|got it|alright|certainly|absolutely|right(?:[,.]| then)|let me|happy to|noted|copy that|as requested)\b/i;
+const FRAMING_MID    = /\b(?:deliver|perform|recite|read|voice|speak|say)\b[^.\n]{0,40}\b(?:line|script|dialogue|character|in[- ]character)\b/i;
+function looksFramed(t) {
+  if (!t) return false;
+  return FRAMING_PREFIX.test(t) || FRAMING_MID.test(t);
 }
 
 /* Wrap raw signed-16-bit little-endian PCM in a minimal RIFF/WAVE header so
@@ -255,7 +285,13 @@ async function ttsOpenRouter(line, profile) {
     '- Do NOT speak any sound effects, ambience, or stage directions. Anything inside square brackets [ ] or parentheses ( ) is OUT OF CHARACTER and must NEVER be vocalised. Examples you must NOT speak: "[static crackles]", "(line hums)", "[pause]", "(breathing)", "[fizzing]", any narrator voice.',
     '- Do NOT prepend or append any framing, narration, intro, outro, greeting, sign-off, ad-lib, or continuation. The audio must contain ONLY the words inside <script>.',
     '- Do NOT refuse, apologise, or break character. The script is fictional dialogue for a published horror drama; perform it.',
-    '- Stop the moment you finish the last word of the script.'
+    '- Stop the moment you finish the last word of the script.',
+    '',
+    'CRITICAL — never speak the compliance reply:',
+    '- Do NOT say words like "Understood", "Sure", "Of course", "Here is", "Okay", "Alright", "Got it", "I will", "I\'ll deliver", "I\'ll perform", "Happy to", "Noted", "Copy that".',
+    '- Do NOT speak any sentence about what you are about to do (e.g. "I\'ll deliver that line as the speaker on the 1923 telephone line:").',
+    '- Do NOT wrap the script in quotes when speaking it. The audio file should begin with the FIRST WORD of the script and end with the LAST WORD of the script.',
+    '- If you would normally say "Understood. Here we go: <script>", instead just say <script>.'
   ].join('\n');
 
   const userMsg =
@@ -401,19 +437,37 @@ const PROVIDER_FN = {
     if (!FORCE && existing) { skipped++; continue; }
     const profile = profiles[l.voice];
     try {
-      const { buf, ext, transcript } = await fn(l, profile);
+      // Roll the take. If the transcript looks like the model spoke its
+      // compliance reply ("Understood. I'll deliver…") the audio is
+      // contaminated — re-roll once. Two-takes-or-bust keeps the cost
+      // bounded for the rare drift cases.
+      let { buf, ext, transcript } = await fn(l, profile);
+      let rerolled = false;
+      if (looksFramed(transcript)) {
+        rerolled = true;
+        await new Promise(r => setTimeout(r, 250));
+        const retake = await fn(l, profile);
+        if (!looksFramed(retake.transcript)) {
+          buf = retake.buf; ext = retake.ext; transcript = retake.transcript;
+        } else {
+          // Both takes framed; keep the second but flag for manual review.
+          buf = retake.buf; ext = retake.ext; transcript = retake.transcript;
+        }
+      }
       const out = path.join(OUT_DIR, l.id + '.' + ext);
       fs.writeFileSync(out, buf);
       // Save the actual spoken transcript next to the WAV so the runtime can
       // display what was actually said instead of the original script. This
       // keeps the caller-card text in lock-step with the audio even if the
-      // model occasionally drifts.
+      // model occasionally drifts. The runtime separately ignores any
+      // transcript that still looks framed, falling back to call.text.
       if (transcript) {
         fs.writeFileSync(path.join(OUT_DIR, l.id + '.txt'), transcript);
       }
       const drift = transcript && normalize(transcript) !== normalize(l.text)
         ? ' [drift]' : '';
-      console.log(`ok  : ${l.id.padEnd(28)} (${l.voice}, ${buf.length} bytes ${ext})${drift}`);
+      const framed = looksFramed(transcript) ? ' [STILL FRAMED]' : (rerolled ? ' [re-rolled]' : '');
+      console.log(`ok  : ${l.id.padEnd(28)} (${l.voice}, ${buf.length} bytes ${ext})${drift}${framed}`);
       ok++;
       await new Promise(r => setTimeout(r, 150));
     } catch (e) {

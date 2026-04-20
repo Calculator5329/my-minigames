@@ -4,6 +4,233 @@ A running log of what shipped in each session.
 
 ## 2026-04-19
 
+### Hotel Cascadia — jumpscare director + creepy SFX pass
+
+Added a dedicated scare system on top of the redesign so the hotel
+*acts up* between calls. Everything is procedural — zero new asset
+weight — and the director never blocks input or punishes the player.
+Pure observational dread.
+
+**New module — `games/switchboard/scares.js` (`SB.Scares`)**
+
+A small state machine spawned per night by `loadNight`. Owns its own
+cooldowns and overlay timers; restarting the night wipes them. Picks
+events on a cooldown weighted by composure and night number, in three
+severity buckets:
+
+- **minor** (always available, ~9–15 s cadence): non-verbal phantom
+  whisper, dust silhouette materialising in the air, brief brass-header
+  text glitch, cable twitch.
+- **moderate** (night ≥ 2 *or* composure < 70 %, ~8–14 s cadence): full
+  power flicker (80 ms blackout + sub-thump + clang), phantom lamp
+  glowing between two real ones (no interaction, no penalty), caller-
+  slip text replaced with `STOP LISTENING.` / `WHO IS BEHIND YOU?` /
+  `THIS IS YOUR ROOM.` for ~450 ms, hand-of-fingers reaching in from
+  the canvas edge for half a second, directory entry name swapped to
+  `YOURSELF` / `▢▢▢▢▢▢▢▢` / `OUTSIDE`, longer header glitch.
+- **major** (night ≥ 3 *and* composure < 50 %, hard 60 s cooldown):
+  full-screen face flash — wide eyes, dark mouth, pale silhouette —
+  for 180 ms, layered over `sfxScreech` + `sfxSubThump` +
+  `sfxGlassBreak`. Used very rarely so it never becomes a meme.
+
+When composure drops below 30 %, a distant 2-beat heartbeat plays every
+~5 s as a mood underlay regardless of which scare was last fired.
+
+**Seven new procedural SFX in `voices.js`**
+
+All routed through the existing `masterGain` so the mute toggle and
+ducking work, all respect `isMuted()`:
+
+- `sfxSubThump(intensity)` — 80→30 Hz sine sweep, 180 ms, sharp attack.
+  Chest-felt impact.
+- `sfxClang(intensity)` — high-Q bandpass at 1800 Hz over a noise
+  burst. Tight metallic hit.
+- `sfxGlassBreak()` — bright noise burst with descending high-pass plus
+  two delayed micro-clinks at 3.4 kHz / 4.6 kHz.
+- `sfxPhantomWhisper(durationMs)` — pinkish noise through bandpass with
+  an LFO wandering the centre frequency. Non-verbal "sssh-h-h".
+- `sfxPhantomRing()` — two slightly-detuned sines (440 / 437 Hz) with
+  rising flutter LFO and a low-pass that opens then cuts hard. Sounds
+  like a phone that shouldn't be calling.
+- `sfxHeartbeat()` — two `sfxSubThump`s 240 ms apart.
+- `sfxScreech()` — sawtooth sweep 2.8 kHz → 380 Hz over 550 ms layered
+  with bright noise. The big one.
+
+**Wiring (`game.js` + `board.js` + `index.html`)**
+
+- `loadNight` instantiates a fresh `SB.Scares.create()` per night.
+- `_tickBoard` calls `SB.Scares.tick(dir, dt, composurePct, night, ctx)`
+  every frame.
+- `_drawBoard` reads `dir.headerOverride`, `dir.cardOverride`,
+  `dir.dirOverride` and passes them to `SB.Board.render` so existing
+  renderers natively show the glitched values when set.
+- `_drawBoard` then calls `SB.Scares.render(ctx, dir)` outside the
+  V7 breathing translate so hand-at-edge silhouettes hug the actual
+  canvas edge and the power flicker covers the entire frame.
+- `index.html` registers `games/switchboard/scares.js?v=1` between
+  `walkthrough.js` and `manifest.js`. Bumped `voices.js` to v=5,
+  `board.js` to v=5, `game.js` to v=5 to bust caches.
+
+Files touched: `games/switchboard/scares.js` (new),
+`games/switchboard/voices.js`, `games/switchboard/board.js`,
+`games/switchboard/game.js`, `index.html`, `docs/changelog.md`,
+`docs/current_task.md`.
+
+---
+
+### Hotel Cascadia — pacing v2 + visual life pass
+
+Player feedback after the initial redesign: *"got stuck on Night 3 — never
+saw anything exciting. Still feels slow + the screen could look better."*
+Two real problems: the pacing TUNINGS shipped in the morning pass were
+under-tuned for early nights *and* over-tuned for N3+ (no recovery path,
+death spiral once composure dropped). Plus the board was visually static.
+
+This pass ships both fixes in one focused effort.
+
+**Pacing (`nights.js`)**
+- New tuning curve. TTL strangled across the board (N1 14→9.5,
+  N2 11→7.5, N3 9→6.0, N4 8→5.0). Miss/wrong penalties retuned downward
+  to compensate.
+- **Composure regen** on every correct route (3–4 per call, doubled for
+  architect rest). The meter can climb back — no more death spirals.
+- **Drain cap** (`tuning.drainCap`) so 5+ overlapping ringing lamps don't
+  vaporise composure in 4 seconds. Drain still scales with overlap, just
+  bounded.
+- **Cold open** — `startNight` now pulls the first two non-architect,
+  non-dead calls forward to t=0 and t=1.5s. The board is alive the moment
+  the player arrives instead of sitting silent for the first 12 seconds.
+- A single ringing lamp NEVER drains composure — that's the player's
+  breathing room to read the directory.
+
+**Bug fix — cable / state leak across takeover restart**
+- The 400 ms `setTimeout` that re-parked cables after a route was a
+  wall-clock timer. If composure broke during that window, `loadNight`
+  swapped in a fresh board *but the timer kept firing* against zombie
+  state. Replaced with a per-cable `parkAt` field on `cable`, ticked by
+  `_tickBoard` against `nightState.t`. When the night restarts, the new
+  board has no `parkAt` set on its cables, so nothing zombies.
+- `loadNight` now also explicitly clears `this.drag`, `this.lampPulses`,
+  `this.dustMotes` defensively.
+
+**Visuals (`board.js` + `game.js`) — V1, V2, V3, V5, V6, V7**
+- **V1 living lamps** — radial halo glow behind each ringing lamp
+  (warm yellow normal, deep red architect, counter-phase pulse). Brass
+  socket rim picks up the halo colour. New `lampPulses` system fires a
+  fading ring + shimmer dot whenever a lamp goes out (correct = green,
+  wrong = red, missed = red, denied = brass, bellhop-ignored = dark).
+- **V2 cable physics** — proper catenary curve with slack proportional
+  to span distance, slow per-cable sway phase, snap-pop highlight on
+  freshly-routed cables (yellow halo for the first 180 ms of their park
+  timer). Each cable now has a 6-px dark outer stroke + 4-px inner colour
+  + 1-px specular highlight along the top so they read as solid rope.
+  Brass jacks get a radial gradient instead of flat fill.
+- **V3 office atmosphere** — `drawLightCone` (warm radial gradient
+  falling from above-board, simulating a hanging oil lamp) + `dustMotes`
+  particle system (slow-drifting cream-coloured dots through the cone) +
+  `drawVignette` (corner darkening, intensifies during architect window).
+- **V5 caller card as paper slip** — replaces the rectangular black
+  panel. Pivot-tilted (-2°) cream paper with drop shadow, brass clip
+  along the top, paper grain texture, **wax seal** on the right showing
+  the caller's room number stamped in dried-blood red, typewriter ink for
+  the name and request, serif Georgia for the spoken text. The slip
+  brightens (cream → warm bright) when the player is leaning in.
+- **V6 architect set-piece** — `drawPaintedWindow` now slams the
+  corridor sliver wide open whenever 3:14 is active (regardless of
+  escalation level), with a vertical warm-yellow gradient and a hint of
+  silhouette. `drawClock` rebuilt as an actual brass-rimmed clock face
+  with hour/minute/second hands frozen at 3:14, and the second hand goes
+  frantic + red during the architect window.
+- **V7 camera life** — slow operator-breathing translation applied to
+  the entire board render (1–2 px sin oscillation, magnified while
+  leaning in). Engine `shake()` already handled wrong-route + composure
+  break, plus a new 5-mag thump on the rising edge of the architect
+  window opening.
+
+**Files touched**
+`games/switchboard/nights.js`, `games/switchboard/board.js`,
+`games/switchboard/game.js`, `docs/changelog.md`, `docs/current_task.md`.
+No content / audio re-bake required — purely engine + render layer.
+
+---
+
+### Hotel Cascadia — full redesign of the switchboard game (code complete)
+Replaces "418 Linden" wholesale. Same `id: switchboard` so saves /
+selector / asset paths don't break, but the title, story, cast,
+mechanics, pacing, visuals, and audio are all new. Story prose is
+locked in `docs/plans/2026-04-19-cascadia.md` (do not rewrite without
+sign-off).
+
+- **Manifest** — selector card retitled `Hotel Cascadia`, new blurb
+  ("the night operator at a hotel that won't let anyone leave"),
+  new theme colors and preview-card text.
+- **Content (`content.js`)** — full rewrite. 8 voice profiles
+  (kestral, ashworth, pryce, bellhop, houseman, child312, replacement,
+  architect), each with a distinct `ttsHint` and per-character
+  `direction` for the bake script. 4 nights with growing line counts
+  (6 → 8 → 10 → 12) and dynamic `SB.DIRECTORIES`. Per-night
+  `SB.ARCHIVED_BY_NIGHT` (rooms that quietly stop existing) and
+  `SB.LEDGER_BY_NIGHT` (inter-night logbook prose). Walkthrough
+  rewritten as 5 sub-scenes inside the operator's office (Wallpaper,
+  Window, Floorboards, Bellhop in doorway, Desk). Three endings:
+  **CHECK OUT** (default — step into 2026, fall asleep on a bench,
+  wake back at the desk with 4,200 floors and a new operator at your
+  shoulder), **UNDERSTUDY** (you become the next operator's hallway),
+  **DEMOLITION** (lay the architect to rest, the loop ends).
+- **Pacing (`nights.js`)** — `nightTuning(night)` is significantly
+  more aggressive: TTL drops 14 → 11 → 9 → 8, miss / wrong penalties
+  climb hard, ringing now drains composure passively (`ringingDrain`).
+  `commitRoute` has special-cased behavior for `architect` calls
+  (correct route awards a "rest point", wrong routes carry no
+  composure penalty), `bellhopDead` lamps (any route is wrong, letting
+  it ring out is correct), and the critical `replacement` call (binds
+  the ending route). Persistent flags wired:
+  `replacement_call_seen`, `replacement_route`,
+  `architect_rest_count`, `architect_misses_total`.
+- **Board (`board.js`)** — `makeBoard(lineCount)` grows the board
+  per night. Brass header reads "HOTEL CASCADIA — FLOOR ZERO". New
+  visuals: painted-over window with a flaking sliver, sagging
+  wallpaper with bleed-through writing, composure-flicker clock that
+  occasionally shows the wrong year. Directory shows `ARCHIVED`
+  stamps and `NEW LINE INSTALLED` tags between nights. Caller card
+  uses `leakyScramble` against `call.leakWords[]` so a few words
+  poke through the dot-fog without the player holding L. Architect
+  calls dim every other lamp.
+- **Voices (`voices.js`)** — added `inhale(durationMs)` (synthesized
+  breath used for the architect's calls) and `bleed(callId, line)`
+  (a quiet whispered snippet from non-focused ringing lamps so the
+  board "leaks").
+- **Walkthrough (`walkthrough.js`)** — replaces the old field-walk.
+  Five sub-scenes inside the operator's office, each with custom
+  scenery (wall seam, painted window, gap in floorboards with feet
+  on the ceiling below, bellhop in the doorway, the desk + SUPPLY
+  door). `triggerEnding` reads `architect_rest_count` and
+  `replacement_route` to pick check-out / understudy / demolition.
+  Ending narration plays in the Replacement's voice.
+- **Game flow (`game.js`)** — new phase machine
+  (`intro → board → ledger → takeover → walk → done`). Inter-night
+  `ledger` screen reads the night's logbook entry. Composure depletion
+  no longer ends the run; it triggers a Replacement-takeover overlay
+  ("Welcome to your first shift at Hotel Cascadia") and restarts the
+  current night. Per-tick driver fires `Voices.inhale()` for architect
+  calls and a `bleed` scheduler so other ringing lamps whisper at the
+  threshold. Board clock label glitches the year backward as composure
+  decays.
+- **Bake script (`scripts/generate-voices.js`)** — `VOICE_MAP`
+  rebuilt for the 8 new keys across `openrouter` / `openai` /
+  `elevenlabs` providers. Skips voiceless `bellhopDead` lines so we
+  don't burn API quota on `text:'...'` placeholders. Ending
+  narration switched from the retired `'you'` voice to
+  `'replacement'`.
+- **One-shot rebake (`scripts/rebake-cascadia.cmd`)** — single
+  command the user runs once: dry-run parser sanity check, back up
+  old voices folder, wipe live voices, then `--force --whisper` bake
+  of the full new cast (~120 lines, 6–12 min). Embeds the same
+  `OPENROUTER_API_KEY` `rebake.cmd` was using.
+
+Audio re-bake is the only step left and is gated behind the user
+running `scripts\rebake-cascadia.cmd`.
+
 ### Orbital Ramp-Up — paragons, juice, 2 new towers
 Phase-1 expansion shipped earlier; this session layers a T5 climax and
 polish on top.

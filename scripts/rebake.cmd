@@ -6,7 +6,7 @@ REM Usage:    scripts\rebake.cmd
 REM Optional: scripts\rebake.cmd --night 1 --voice halberd
 REM
 REM Requires OPENROUTER_API_KEY in the environment, or set it on the next line.
-if "%OPENROUTER_API_KEY%"=="" set OPENROUTER_API_KEY=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
+set OPENROUTER_API_KEY=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
 
 pushd "%~dp0\.."
 echo [%DATE% %TIME%] starting bake (this will take ~5-10 minutes for the full 108 lines)
