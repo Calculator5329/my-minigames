@@ -1,206 +1,144 @@
-// games/sand/lib/levels.js
-// Dual-entry module: Node (CommonJS) and browser (window.NDP.Sand.Levels).
-//
-// Task 21: level loader + validator.
-//
-//   Levels.validateLevel(obj, { knownLayers } = {}) -> { ok, errors }
-//   Levels.validateLayers(obj)                      -> { ok, errors }
-//   Levels.load({ basePath })                       -> Promise<{ layers, levels }>  (browser; uses fetch)
-//   Levels.loadWith({ readFile, listDir, basePath })-> Promise<{ layers, levels }>  (testable)
-
 (function (root, factory) {
   const mod = factory();
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { Levels: mod.Levels };
-    module.exports.Levels = mod.Levels;
-  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = mod;
   if (typeof window !== 'undefined') {
     window.NDP = window.NDP || {};
     window.NDP.Sand = window.NDP.Sand || {};
     window.NDP.Sand.Levels = mod.Levels;
   }
 })(typeof self !== 'undefined' ? self : this, function () {
-  const ID_RE = /^[A-Za-z0-9_]+$/;
+  const ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
+  const BIT = new Set([0, 1]);
 
-  function isString(v) { return typeof v === 'string'; }
+  function isString(v) { return typeof v === 'string' && v.length > 0; }
   function isNumber(v) { return typeof v === 'number' && isFinite(v); }
-  function isArray(v) { return Array.isArray(v); }
+  function isArray(v)  { return Array.isArray(v); }
   function isObject(v) { return v && typeof v === 'object' && !Array.isArray(v); }
-
-  function distinct(arr) {
-    const s = new Set();
-    for (const v of arr) {
-      if (s.has(v)) return false;
-      s.add(v);
-    }
-    return true;
-  }
-
-  function validateStarGoals(sg, errs) {
-    if (!isObject(sg)) { errs.push('starGoals: must be object'); return; }
-    for (const k of ['gates', 'ticks']) {
-      const g = sg[k];
-      if (!isObject(g)) { errs.push('starGoals.' + k + ': must be object'); continue; }
-      if (!isNumber(g['3star'])) errs.push('starGoals.' + k + '.3star: must be number');
-      if (!isNumber(g['2star'])) errs.push('starGoals.' + k + '.2star: must be number');
-    }
-  }
+  function isBit(v)    { return BIT.has(v); }
 
   function validateIO(io, errs) {
     if (!isObject(io)) { errs.push('io: must be object'); return { inputs: [], outputs: [] }; }
-    const inputs = io.inputs;
-    const outputs = io.outputs;
-    if (!isArray(inputs) || inputs.length === 0) errs.push('io.inputs: must be non-empty array');
-    else {
-      for (const v of inputs) if (!isString(v)) { errs.push('io.inputs: must be strings'); break; }
-      if (!distinct(inputs)) errs.push('io.inputs: must be distinct');
+    const ins = io.inputs, outs = io.outputs;
+    if (!isArray(ins) || ins.length === 0) errs.push('io.inputs: must be non-empty array');
+    if (!isArray(outs) || outs.length === 0) errs.push('io.outputs: must be non-empty array');
+    const labels = new Set();
+    const inputs = isArray(ins) ? ins : [];
+    const outputs = isArray(outs) ? outs : [];
+    for (const p of inputs) {
+      if (!isObject(p) || !isString(p.label)) { errs.push('io.inputs: each must have label'); break; }
+      if (labels.has(p.label)) errs.push('io.inputs: duplicate label ' + p.label);
+      labels.add(p.label);
     }
-    if (!isArray(outputs) || outputs.length === 0) errs.push('io.outputs: must be non-empty array');
-    else {
-      for (const v of outputs) if (!isString(v)) { errs.push('io.outputs: must be strings'); break; }
-      if (!distinct(outputs)) errs.push('io.outputs: must be distinct');
+    for (const p of outputs) {
+      if (!isObject(p) || !isString(p.label)) { errs.push('io.outputs: each must have label'); break; }
+      if (labels.has(p.label)) errs.push('io.outputs: duplicate label ' + p.label);
+      labels.add(p.label);
     }
-    return { inputs: isArray(inputs) ? inputs : [], outputs: isArray(outputs) ? outputs : [] };
+    return { inputs, outputs };
   }
 
   function validateTruthTable(tt, io, errs) {
-    if (!isArray(tt)) { errs.push('truthTable: must be array'); return; }
+    if (!isArray(tt) || tt.length === 0) { errs.push('truthTable: must be non-empty array'); return; }
     for (let i = 0; i < tt.length; i++) {
       const row = tt[i];
       if (!isObject(row)) { errs.push('truthTable[' + i + ']: must be object'); continue; }
-      if (!isArray(row.in) || row.in.length !== io.inputs.length) {
-        errs.push('truthTable[' + i + '].in: length must be ' + io.inputs.length);
+      const rin = row.in, rout = row.out;
+      if (isArray(rin)) {
+        if (rin.length !== io.inputs.length) errs.push('truthTable[' + i + '].in: length ' + rin.length + ' != ' + io.inputs.length);
+        for (const b of rin) if (!isBit(b)) { errs.push('truthTable[' + i + '].in: values must be 0|1'); break; }
+      } else if (isObject(rin)) {
+        for (const p of io.inputs) {
+          if (!(p.label in rin)) errs.push('truthTable[' + i + '].in: missing ' + p.label);
+          else if (!isBit(rin[p.label])) errs.push('truthTable[' + i + '].in[' + p.label + ']: must be 0|1');
+        }
+      } else {
+        errs.push('truthTable[' + i + '].in: must be array or object');
       }
-      if (!isArray(row.out) || row.out.length !== io.outputs.length) {
-        errs.push('truthTable[' + i + '].out: length must be ' + io.outputs.length);
+      if (isArray(rout)) {
+        if (rout.length !== io.outputs.length) errs.push('truthTable[' + i + '].out: length ' + rout.length + ' != ' + io.outputs.length);
+        for (const b of rout) if (!isBit(b)) { errs.push('truthTable[' + i + '].out: values must be 0|1'); break; }
+      } else if (isObject(rout)) {
+        for (const p of io.outputs) {
+          if (!(p.label in rout)) errs.push('truthTable[' + i + '].out: missing ' + p.label);
+          else if (!isBit(rout[p.label])) errs.push('truthTable[' + i + '].out[' + p.label + ']: must be 0|1');
+        }
+      } else {
+        errs.push('truthTable[' + i + '].out: must be array or object');
       }
     }
   }
 
   function validateLevel(obj, opts) {
-    const errs = [];
     opts = opts || {};
-    const knownLayers = opts.knownLayers || null;
-
-    if (!isObject(obj)) {
-      return { ok: false, errors: ['level: must be object'] };
-    }
-
-    if (!isString(obj.id) || !obj.id) errs.push('id: required string');
-    else if (!ID_RE.test(obj.id)) errs.push('id: must match /^[A-Za-z0-9_]+$/');
-
-    if (!isString(obj.layer) || !obj.layer) errs.push('layer: required string');
-    else if (knownLayers && knownLayers.indexOf(obj.layer) < 0) {
-      errs.push('layer: unknown (' + obj.layer + ')');
-    }
-
+    const errs = [];
+    if (!isObject(obj)) return { ok: false, errors: ['level: must be object'] };
+    if (!isString(obj.id) || !ID_RE.test(obj.id)) errs.push('id: required, matches ' + ID_RE);
+    if (!isString(obj.track)) errs.push('track: required');
+    else if (opts.knownTracks && opts.knownTracks.indexOf(obj.track) < 0) errs.push('track: unknown (' + obj.track + ')');
     if (!isNumber(obj.order) || obj.order < 0) errs.push('order: required number >= 0');
-
-    if (!isString(obj.title)) errs.push('title: required string');
-    if (!isString(obj.brief)) errs.push('brief: required string');
-
-    if (!isArray(obj.allowedComponents)) errs.push('allowedComponents: required array');
-    else {
-      for (const v of obj.allowedComponents) {
-        if (!isString(v)) { errs.push('allowedComponents: must be strings'); break; }
-      }
-    }
-
+    if (!isString(obj.title)) errs.push('title: required');
+    if (!isString(obj.brief)) errs.push('brief: required');
+    if (!isNumber(obj.difficulty) || obj.difficulty < 1 || obj.difficulty > 5) errs.push('difficulty: 1..5');
+    if (!isArray(obj.availableGates)) errs.push('availableGates: must be array');
+    else for (const g of obj.availableGates) if (!isString(g)) { errs.push('availableGates: entries must be strings'); break; }
+    if (!isNumber(obj.parGates) || obj.parGates < 0) errs.push('parGates: required number >= 0');
     const io = validateIO(obj.io, errs);
     validateTruthTable(obj.truthTable, io, errs);
-    validateStarGoals(obj.starGoals, errs);
-
+    if (obj.hints !== undefined) {
+      if (!isArray(obj.hints)) errs.push('hints: must be array if present');
+      else for (const h of obj.hints) if (!isString(h)) { errs.push('hints: entries must be strings'); break; }
+    }
+    if (obj.prerequisites !== undefined) {
+      if (!isArray(obj.prerequisites)) errs.push('prerequisites: must be array if present');
+      else for (const p of obj.prerequisites) if (!isString(p)) { errs.push('prerequisites: entries must be strings'); break; }
+    }
     if (obj.unlocksComponent !== undefined) {
-      if (!isObject(obj.unlocksComponent)) errs.push('unlocksComponent: must be object');
-      else {
-        if (!isString(obj.unlocksComponent.id)) errs.push('unlocksComponent.id: required string');
-        if (!isString(obj.unlocksComponent.name)) errs.push('unlocksComponent.name: required string');
-      }
+      const uc = obj.unlocksComponent;
+      if (!isObject(uc) || !isString(uc.id) || !isString(uc.name)) errs.push('unlocksComponent: {id,name} required');
     }
-
-    if (obj.referenceSolution !== undefined) {
-      if (!isObject(obj.referenceSolution)) errs.push('referenceSolution: must be object');
-    }
-
+    if (obj.sequential !== undefined && typeof obj.sequential !== 'boolean') errs.push('sequential: must be boolean if present');
     return { ok: errs.length === 0, errors: errs };
   }
 
-  function validateLayers(obj) {
+  function validateTracks(obj) {
     const errs = [];
-    if (!isObject(obj)) return { ok: false, errors: ['layers: must be object'] };
-    if (obj.version !== 1) errs.push('layers.version: must be 1');
-    if (!isArray(obj.layers)) errs.push('layers.layers: must be array');
+    if (!isObject(obj)) return { ok: false, errors: ['tracks: must be object'] };
+    if (!isArray(obj.tracks) || obj.tracks.length === 0) errs.push('tracks: must be non-empty array');
     else {
-      for (let i = 0; i < obj.layers.length; i++) {
-        const L = obj.layers[i];
-        if (!isObject(L)) { errs.push('layers[' + i + ']: must be object'); continue; }
-        if (!isString(L.id) || !L.id) errs.push('layers[' + i + '].id: required string');
-        if (!isString(L.title)) errs.push('layers[' + i + '].title: required string');
-        if (!isNumber(L.order)) errs.push('layers[' + i + '].order: required number');
+      const ids = new Set();
+      for (const t of obj.tracks) {
+        if (!isObject(t) || !isString(t.id) || !isString(t.title) || !isNumber(t.order)) {
+          errs.push('tracks[]: each needs { id, title, order }');
+          continue;
+        }
+        if (ids.has(t.id)) errs.push('tracks: duplicate id ' + t.id);
+        ids.add(t.id);
       }
     }
     return { ok: errs.length === 0, errors: errs };
-  }
-
-  function joinPath(base, rest) {
-    if (!base) return rest;
-    if (base.endsWith('/')) return base + rest;
-    return base + '/' + rest;
   }
 
   async function loadWith(opts) {
-    opts = opts || {};
-    const readFile = opts.readFile;
-    const listDir = opts.listDir;
-    const basePath = opts.basePath || 'games/sand/data';
-    if (typeof readFile !== 'function') throw new Error('loadWith: readFile required');
-    if (typeof listDir !== 'function') throw new Error('loadWith: listDir required');
-
-    const layersRaw = await readFile(joinPath(basePath, 'layers.json'));
-    const layersDoc = JSON.parse(layersRaw);
-    const layersCheck = validateLayers(layersDoc);
-    if (!layersCheck.ok) {
-      throw new Error('layers.json invalid: ' + layersCheck.errors.join('; '));
-    }
-    const layers = layersDoc.layers.slice();
-    const knownLayers = layers.map((L) => L.id);
-
-    const files = await listDir(joinPath(basePath, 'levels'));
-    const levels = {};
-    for (const fn of files) {
-      if (!fn || !fn.endsWith('.json')) continue;
-      if (fn === 'index.json') continue;
-      const raw = await readFile(joinPath(joinPath(basePath, 'levels'), fn));
-      const doc = JSON.parse(raw);
-      const check = validateLevel(doc, { knownLayers });
-      if (!check.ok) {
-        throw new Error('level ' + fn + ' invalid: ' + check.errors.join('; '));
+    const { readFile, listDir, basePath } = opts;
+    const tracksJson = JSON.parse(await readFile(basePath + '/tracks.json'));
+    const tv = validateTracks(tracksJson);
+    if (!tv.ok) throw new Error('tracks.json: ' + tv.errors.join('; '));
+    const knownTracks = tracksJson.tracks.map(t => t.id);
+    const levels = [];
+    for (const t of tracksJson.tracks) {
+      const dir = basePath + '/levels/' + t.id;
+      let files;
+      try { files = await listDir(dir); } catch (_e) { files = []; }
+      files = files.filter(f => f.endsWith('.json')).sort();
+      for (const f of files) {
+        const obj = JSON.parse(await readFile(dir + '/' + f));
+        const v = validateLevel(obj, { knownTracks });
+        if (!v.ok) throw new Error(f + ': ' + v.errors.join('; '));
+        levels.push(obj);
       }
-      levels[doc.id] = doc;
     }
-
-    return { layers, levels };
+    return { tracks: tracksJson, levels };
   }
 
-  async function load(opts) {
-    opts = opts || {};
-    const basePath = opts.basePath || 'games/sand/data';
-    const readFile = async (path) => {
-      const res = await fetch(path);
-      if (!res.ok) throw new Error('fetch ' + path + ' -> ' + res.status);
-      return await res.text();
-    };
-    // Browser listDir: read index.json with { files: [...] }.
-    const listDir = async (path) => {
-      const idxPath = joinPath(path, 'index.json');
-      const res = await fetch(idxPath);
-      if (!res.ok) throw new Error('fetch ' + idxPath + ' -> ' + res.status);
-      const doc = JSON.parse(await res.text());
-      return isArray(doc.files) ? doc.files : [];
-    };
-    return loadWith({ readFile, listDir, basePath });
-  }
-
-  const Levels = { validateLevel, validateLayers, load, loadWith };
-  return { Levels };
+  return { Levels: { validateLevel, validateTracks, loadWith } };
 });
