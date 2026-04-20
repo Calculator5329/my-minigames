@@ -15,6 +15,7 @@
       runs: 0, kills: 0, bossKills: 0, leaks: 0, totalSpent: 0,
       bestScore: 0, bestRound: 0
     },
+    lifetimeXp: {},
     settings: { soundOn: true, fastForwardDefault: 1 }
   };
 
@@ -152,11 +153,27 @@
     return (load().bestFreeplayLevel | 0) || 0;
   }
 
+  function addLifetimeXp(key, amount) {
+    if (!Storage) return 0;
+    const d = load();
+    const cur = Object.assign({}, d.lifetimeXp || {});
+    cur[key] = (cur[key] | 0) + Math.max(0, Math.floor(amount));
+    d.lifetimeXp = cur;
+    save(d);
+    return cur[key];
+  }
+  function getLifetimeXp(key) {
+    if (!Storage) return 0;
+    const d = load();
+    return ((d.lifetimeXp || {})[key]) | 0;
+  }
+
   O.Persist = {
     load, save, addStardust, getStardust, recordRunEnd, recordRoundClear,
     getBestRound, hasSeenHint, markHintSeen,
     recordLeaderboardEntry, getLeaderboard,
     recordLifetimeStats, getLifetimeStats,
-    recordFreeplayLevel, getBestFreeplayLevel
+    recordFreeplayLevel, getBestFreeplayLevel,
+    addLifetimeXp, getLifetimeXp
   };
 })();

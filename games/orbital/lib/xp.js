@@ -35,6 +35,9 @@
   function grant(tower, amount) {
     if (!tower) return false;
     if (amount <= 0) return false;
+    if (tower.key && O.Persist && O.Persist.addLifetimeXp) {
+      O.Persist.addLifetimeXp(tower.key, amount);
+    }
     const before = tower.level || 1;
     tower.xp = (tower.xp || 0) + amount;
     const after = levelOf(tower);
