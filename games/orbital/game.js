@@ -94,6 +94,7 @@
       this.enemies = [];
       this.projectiles = [];
       this.towers = [];
+      this.mines = [];
       this.spawnQueue = [];
       this.waveTimer = 0;
       this.selectedTower = null;
@@ -601,6 +602,16 @@
         }
         list.length = n;
       }
+      // Proximity mines
+      if (this.mines && this.mines.length) {
+        for (const m of this.mines.slice()) {
+          for (const e of this.enemies) {
+            const d2 = (e.x - m.x) * (e.x - m.x) + (e.y - m.y) * (e.y - m.y);
+            const hit = (e.size || 16) + 8;
+            if (d2 <= hit * hit) { this._triggerMine(m); break; }
+          }
+        }
+      }
       // Cull / bounty
       this.cullEnemies();
       // Wave end
@@ -853,6 +864,18 @@
         const def = O.Abilities.get(id);
         if (def && def.tick) def.tick(this, t, dt);
       }
+      if (t.key === 'saboteur') {
+        t._mineT = (t._mineT || 0) - dt;
+        let rate = t.stats.mineRate || 4;
+        for (const o of this.towers) {
+          if (o.key !== 'engineer') continue;
+          const d2 = (o.x - t.x) ** 2 + (o.y - t.y) ** 2;
+          if (d2 <= t.stats.range * t.stats.range) { rate *= 0.5; break; }
+        }
+        if (t._mineT <= 0) { this._plantMine(t); t._mineT = rate; }
+        return;
+      }
+
       const buffs = this.buffsForTower(t);
       const target = this.findTarget(t);
       t.target = target;
@@ -909,6 +932,14 @@
         const fn = O.Abilities.get(rsId).multiplier;
         if (fn) rateMul *= fn(t);
       }
+      // Saboteur synergy — engineer sentries in a saboteur's range fire 2× faster.
+      if (t.key === 'engineer') {
+        for (const o of this.towers) {
+          if (o.key !== 'saboteur') continue;
+          const d2 = (o.x - t.x) ** 2 + (o.y - t.y) ** 2;
+          if (d2 <= o.stats.range * o.stats.range) { rateMul *= 2; break; }
+        }
+      }
       // Heat Storm forces fast pulses (handled in flare branch — gun tower path skipped here)
       if (t.cd <= 0 && st.fireRate > 0) {
         const shots = Math.max(1, st.multiShot || 1);
@@ -958,6 +989,48 @@
           fromTower: t, isMine: true, settle: 0
         });
       }
+    }
+
+    _plantMine(t, fromAbility) {
+      if (!this.mines) this.mines = [];
+      const live = this.mines.filter(m => m.owner === t);
+      const cap = (t.stats.mineCap || 3);
+      if (!fromAbility && live.length >= cap) return;
+      const r = t.stats.range;
+      const r2 = r * r;
+      let best = null;
+      for (let tries = 0; tries < 12; tries++) {
+        const sample = PATH_SAMPLES[Math.floor(Math.random() * PATH_SAMPLES.length)];
+        const d2 = (sample.x - t.x) * (sample.x - t.x) + (sample.y - t.y) * (sample.y - t.y);
+        if (d2 > r2) continue;
+        let occupied = false;
+        for (const m of this.mines) {
+          if ((m.x - sample.x) ** 2 + (m.y - sample.y) ** 2 < 18 * 18) {
+            occupied = true; break;
+          }
+        }
+        if (occupied) continue;
+        best = sample;
+        break;
+      }
+      if (!best) return;
+      this.mines.push({
+        x: best.x, y: best.y, owner: t,
+        dmg: t.stats.mineDmg, splash: t.stats.mineSplash,
+        size: 8, placedAt: this.time
+      });
+    }
+
+    _triggerMine(m) {
+      if (!m || !this.mines || !this.mines.includes(m)) return;
+      for (const e of this.enemies) {
+        const d2 = (e.x - m.x) * (e.x - m.x) + (e.y - m.y) * (e.y - m.y);
+        if (d2 <= m.splash * m.splash) this.damage(e, m.dmg, 'mine');
+      }
+      if (this.particles && this.particles.burst) {
+        this.particles.burst(m.x, m.y, 18, { color: '#ff5530', life: 0.4, speed: 200, size: 3 });
+      }
+      this.mines = this.mines.filter(x => x !== m);
     }
 
     _updateTesla(t, target, buffs, dt) {
@@ -1585,9 +1658,46 @@
 
       // Towers
       for (const t of this.towers) this._drawTower(ctx, t);
+      // Saboteur ↔ Engineer synergy lines
+      for (const t of this.towers) {
+        if (t.key !== 'saboteur') continue;
+        for (const o of this.towers) {
+          if (o.key !== 'engineer') continue;
+          const d2 = (o.x - t.x) * (o.x - t.x) + (o.y - t.y) * (o.y - t.y);
+          if (d2 > t.stats.range * t.stats.range) continue;
+          ctx.save();
+          ctx.setLineDash([3, 4]);
+          ctx.strokeStyle = 'rgba(255, 216, 107, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(t.x, t.y);
+          ctx.lineTo(o.x, o.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
       // Enemies
       for (const e of this.enemies) this._drawEnemy(ctx, e);
       if (!O.ParagonCinematic || !O.ParagonCinematic.active(this)) this._drawLeadGlow(ctx);
+      // Mines
+      if (this.mines && this.mines.length) {
+        for (const m of this.mines) {
+          ctx.save();
+          ctx.fillStyle = '#ff5530';
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffd86b';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.globalAlpha = 0.4 + 0.4 * Math.sin(this.time * 6 + m.x * 0.01);
+          ctx.strokeStyle = '#ffd86b';
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
       // Projectiles
       for (const p of this.projectiles) this._drawProjectile(ctx, p);
 

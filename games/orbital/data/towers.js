@@ -802,6 +802,48 @@
           ]
         }
       }
+    },
+
+    // ======== SABOTEUR — proximity mine layer ========
+    saboteur: {
+      unlock: { round: 4 },
+      base: {
+        name: 'Saboteur', short: 'Sab', cost: 400,
+        sprite: 'orb_turret_saboteur', color: '#ff5566',
+        range: 140, fireRate: 0, dmg: 0, priority: 'first',
+        mineRate: 4, mineCap: 3, mineDmg: 80, mineSplash: 50,
+        desc: 'Plants proximity mines along the path.'
+      },
+      paths: {
+        A: {
+          id: 'minefield', name: 'Minefield', accent: '#ffd86b',
+          tiers: [
+            { cost: 280, label: 'More Mines', desc: 'cap +2',
+              glyph: 'splash', patch: { mineCap: 5 } },
+            { cost: 500, label: 'Dense Field', desc: 'cap +3, faster replant',
+              glyph: 'splash', patch: { mineCap: 8, mineRate: 3 } },
+            { cost: 900, label: 'Wide Blast', desc: '+30 splash',
+              glyph: 'aura', patch: { mineSplash: 80 } },
+            { cost: 2200, label: 'Saturation', desc: 'cluster-drop ability',
+              glyph: 'burst', patch: { mineCap: 12 },
+              ability: 'mineSaturation' }
+          ]
+        },
+        B: {
+          id: 'demolitions', name: 'Demolitions', accent: '#ff5530',
+          tiers: [
+            { cost: 350, label: 'Heavy Mines', desc: '180 dmg',
+              glyph: 'dmg', patch: { mineDmg: 180 } },
+            { cost: 600, label: 'Bigger Boom', desc: '+40 splash',
+              glyph: 'splash', patch: { mineSplash: 90 } },
+            { cost: 1100, label: 'Siege Mines', desc: '350 dmg; cap 1',
+              glyph: 'nuke', patch: { mineDmg: 350, mineCap: 1, mineRate: 6 } },
+            { cost: 2600, label: 'Nuke Mine', desc: '500 dmg / 150 splash',
+              glyph: 'nuke', patch: { mineDmg: 500, mineSplash: 150 },
+              ability: 'mineDetonate' }
+          ]
+        }
+      }
     }
   };
 

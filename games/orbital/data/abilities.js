@@ -362,6 +362,28 @@
       }
     },
 
+    // ---- SABOTEUR ----
+    mineSaturation: {
+      label: 'Saturation', desc: 'immediately plant cap-worth of mines',
+      cd: 25, glyph: 'burst', color: '#ffd86b',
+      activate(g, t) {
+        const cap = t.stats.mineCap || 3;
+        for (let i = 0; i < cap; i++) {
+          setTimeout(() => { if (g._plantMine) g._plantMine(t, true); }, i * 60);
+        }
+        g.flashMessage('SATURATION', '#ffd86b');
+      }
+    },
+    mineDetonate: {
+      label: 'Detonate', desc: 'detonates all live mines',
+      cd: 20, glyph: 'nuke', color: '#ff5530',
+      activate(g, t) {
+        const mines = (g.mines || []).filter(m => m.owner === t);
+        for (const m of mines) { if (g._triggerMine) g._triggerMine(m); }
+        g.flashMessage('DETONATE', '#ff5530');
+      }
+    },
+
     // ---- PARAGONS ----
     paragonBoltStorm: {
       label: 'Bolt Storm', desc: '40 bolts in a fan',

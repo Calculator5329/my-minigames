@@ -894,6 +894,12 @@
     .replace(/#4fc8ff/g, '#16c060')
     .replace(/#d8faff/g, '#c8f4d4');
 
+  // --- SABOTEUR — red-tinted dart variant ---
+  S.turret_saboteur = S.turret_dart
+    .replace(/#7ae0ff/g, '#ff5566')
+    .replace(/#4fc8ff/g, '#c02040')
+    .replace(/#d8faff/g, '#ffd0d8');
+
   // ==================================================================
   //  Registry
   // ==================================================================
