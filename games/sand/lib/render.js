@@ -1,7 +1,6 @@
 // games/sand/lib/render.js
-// Dual-entry module: works in Node (CommonJS) and in the browser (window.NDP.Sand.Render).
-// Canvas renderer for the sand minigame workspace: lattice grid, nodes, pins,
-// wires, signal-flow particles, oscilloscope strip, pass celebration.
+// Dual-entry: Node CommonJS + window.NDP.Sand.Render.
+// Canvas renderer for gate-level circuits (ANSI shapes, orthogonal wires).
 
 (function (root, factory) {
   const mod = factory();
@@ -15,711 +14,443 @@
     window.NDP.Sand.Render = mod.Render;
   }
 })(typeof self !== 'undefined' ? self : this, function () {
-  // ---- Theme ----
+
   const THEME = {
-    bg: '#0e1116',
-    bgGradient: '#141a24',
-    gridDot: '#8aa0b8',
-    fg: '#e7ecf3',
-    nodeFill: '#1a2030',
-    nodeFillHi: '#232b40',
-    nodeStroke: '#3a4560',
-    nodeInner: '#52627c',
-    nodeShadow: '#05080c',
-    nodeSelected: '#ffcc33',
-    pin: '#cfd6e0',
-    wire: '#49546a',
-    wireDim: '#2e3850',
-    wireActive: '#ffcc33',
-    accent: '#ffcc33',
-    accent2: '#ff5e7e',
-    warn: '#ff4d4d',
-    scopeBg: 'rgba(6,10,16,0.78)',
-    scopeFg: '#8aa0b8',
+    bg: '#0a0f1a',
+    gridDot: '#1a2240',
+    gateFill: '#1a2240',
+    gateStroke: '#d8e0ff',
+    customStroke: '#c8a8ff',
+    textFg: '#d8e0ff',
+    textDim: '#8a94b8',
+    select: '#ffd86b',
+    wireHi: '#ffd86b',
+    wireLo: '#4a5266',
+    on: '#ffd86b',
+    off: '#4a5266'
   };
 
-  const GRID_PITCH = 24;
-  const NODE_R = 6;
-  const PIN_R = 3.5;
+  const GATE_W = 60, GATE_H = 40;
+  const CUSTOM_W = 70, CUSTOM_H = 50;
+  const PORT_R = 4;
 
-  const PRIMITIVE_TYPES = ['pad_in', 'pad_out', 'power', 'ground', 'switch', 'pullup', 'clock'];
-
-  // ---- Pin layout ----
-  const PIN_LAYOUTS = {
-    pad_in:  { in: [], out: ['out'] },
-    pad_out: { in: ['in'], out: [] },
-    power:   { in: [], out: ['out'] },
-    ground:  { in: [], out: ['out'] },
-    switch:  { in: ['gate', 'in'], out: ['out'] },
-    pullup:  { in: ['a'], out: ['out'] },
-    clock:   { in: [], out: ['out'] },
+  const PIN_LAYOUT = {
+    NOT:    { inputs: ['a'],          outputs: ['y'] },
+    AND:    { inputs: ['a','b'],      outputs: ['y'] },
+    OR:     { inputs: ['a','b'],      outputs: ['y'] },
+    NAND:   { inputs: ['a','b'],      outputs: ['y'] },
+    NOR:    { inputs: ['a','b'],      outputs: ['y'] },
+    XOR:    { inputs: ['a','b'],      outputs: ['y'] },
+    XNOR:   { inputs: ['a','b'],      outputs: ['y'] },
+    INPUT:  { inputs: [],             outputs: ['y'] },
+    OUTPUT: { inputs: ['a'],          outputs: [] },
+    CLOCK:  { inputs: [],             outputs: ['y'] },
+    CONST0: { inputs: [],             outputs: ['y'] },
+    CONST1: { inputs: [],             outputs: ['y'] },
+    DLATCH: { inputs: ['d','en'],     outputs: ['q','qn'] },
+    DFF:    { inputs: ['d','clk'],    outputs: ['q','qn'] },
+    SRLATCH:{ inputs: ['s','r'],      outputs: ['q','qn'] }
   };
 
-  function nodeSize(node) {
-    if (node.type === 'pad_in' || node.type === 'pad_out') {
-      return { w: 64, h: 36 };
+  function pinLayoutFor(node, circuit) {
+    const direct = PIN_LAYOUT[node.type];
+    if (direct) return direct;
+    const gates = (typeof window !== 'undefined' && window.NDP && window.NDP.Sand && window.NDP.Sand.Gates) ? window.NDP.Sand.Gates : null;
+    if (gates && gates.primitives && gates.primitives[node.type]) {
+      const p = gates.primitives[node.type];
+      if (p.inputs && p.outputs) return { inputs: p.inputs.slice(), outputs: p.outputs.slice() };
     }
-    return { w: 72, h: 40 };
+    if (circuit && circuit.customGatePinLayouts && circuit.customGatePinLayouts[node.type]) {
+      return circuit.customGatePinLayouts[node.type];
+    }
+    return { inputs: ['a','b'], outputs: ['y'] };
   }
 
-  function pinsFor(node) {
-    return PIN_LAYOUTS[node.type] || { in: [], out: [] };
+  function isCustomType(node) {
+    return !PIN_LAYOUT[node.type];
   }
 
-  function pinPosition(node, pinName) {
-    const { w, h } = nodeSize(node);
-    const left = node.x - w / 2;
-    const right = node.x + w / 2;
-    const top = node.y - h / 2;
-    const pins = pinsFor(node);
-    const inIx = pins.in.indexOf(pinName);
-    const outIx = pins.out.indexOf(pinName);
+  function gateBounds(node) {
+    if (isCustomType(node)) {
+      return { x: node.x - CUSTOM_W/2, y: node.y - CUSTOM_H/2, w: CUSTOM_W, h: CUSTOM_H };
+    }
+    return { x: node.x - GATE_W/2, y: node.y - GATE_H/2, w: GATE_W, h: GATE_H };
+  }
+
+  function portPos(node, pin, circuit) {
+    const b = gateBounds(node);
+    const layout = pinLayoutFor(node, circuit);
+    const inIx = layout.inputs.indexOf(pin);
+    const outIx = layout.outputs.indexOf(pin);
     if (inIx >= 0) {
-      const n = pins.in.length;
-      const step = h / (n + 1);
-      return { x: left, y: top + step * (inIx + 1) };
+      const n = layout.inputs.length;
+      const step = b.h / (n + 1);
+      return { x: b.x, y: b.y + step * (inIx + 1) };
     }
     if (outIx >= 0) {
-      const n = pins.out.length;
-      const step = h / (n + 1);
-      return { x: right, y: top + step * (outIx + 1) };
+      const n = layout.outputs.length;
+      const step = b.h / (n + 1);
+      return { x: b.x + b.w, y: b.y + step * (outIx + 1) };
     }
-    return { x: right, y: node.y };
+    return { x: b.x + b.w, y: node.y };
   }
 
-  function nodeContainsWorld(node, wp) {
-    const { w, h } = nodeSize(node);
-    return (
-      wp.x >= node.x - w / 2 &&
-      wp.x <= node.x + w / 2 &&
-      wp.y >= node.y - h / 2 &&
-      wp.y <= node.y + h / 2
-    );
+  // Camera math (inline; mirrors lib/camera.js but uses canvasW/canvasH).
+  function w2s(cam, wx, wy, vw, vh) {
+    return { x: (wx - cam.x) * cam.zoom + vw/2, y: (wy - cam.y) * cam.zoom + vh/2 };
+  }
+  function s2w(cam, sx, sy, vw, vh) {
+    return { x: (sx - vw/2) / cam.zoom + cam.x, y: (sy - vh/2) / cam.zoom + cam.y };
   }
 
-  function pickPin(graph, worldPt, thresholdWorld) {
-    let best = null;
-    let bestD2 = thresholdWorld * thresholdWorld;
-    for (const id of Object.keys(graph.nodes)) {
-      const node = graph.nodes[id];
-      const pins = pinsFor(node);
-      for (const dir of ['in', 'out']) {
-        for (const name of pins[dir]) {
-          const pp = pinPosition(node, name);
-          const dx = pp.x - worldPt.x;
-          const dy = pp.y - worldPt.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 <= bestD2) {
-            bestD2 = d2;
-            best = { node: node.id, pin: name, dir, pos: pp };
-          }
-        }
-      }
+  function portAt(camera, node, sx, sy, slack, circuit) {
+    const sl = typeof slack === 'number' ? slack : 8;
+    const vw = camera._vw || 0, vh = camera._vh || 0;
+    const layout = pinLayoutFor(node, circuit);
+    const pins = layout.inputs.concat(layout.outputs);
+    let best = null, bestD = sl;
+    for (const p of pins) {
+      const wp = portPos(node, p, circuit);
+      const sp = w2s(camera, wp.x, wp.y, vw, vh);
+      const d = Math.hypot(sp.x - sx, sp.y - sy);
+      if (d <= bestD) { bestD = d; best = p; }
     }
     return best;
   }
 
-  // ---- Color helpers ----
-
-  function hashString(s) {
-    let h = 2166136261 >>> 0;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
+  function nodeAt(camera, circuit, sx, sy) {
+    const vw = camera._vw || 0, vh = camera._vh || 0;
+    const wp = s2w(camera, sx, sy, vw, vh);
+    for (let i = circuit.nodes.length - 1; i >= 0; i--) {
+      const n = circuit.nodes[i];
+      const b = gateBounds(n);
+      if (wp.x >= b.x && wp.x <= b.x + b.w && wp.y >= b.y && wp.y <= b.y + b.h) return n.id;
     }
-    return h >>> 0;
+    return null;
   }
 
-  function hueForId(id) {
-    return hashString(String(id)) % 360;
-  }
-
-  function hslStr(h, s, l, a) {
-    if (a === undefined) return 'hsl(' + h + ',' + s + '%,' + l + '%)';
-    return 'hsla(' + h + ',' + s + '%,' + l + '%,' + a + ')';
-  }
-
-  // ---- Drawing helpers ----
-
-  function w2s(cam, wp, viewport) {
-    return {
-      x: (wp.x - cam.x) * cam.zoom + viewport.w / 2,
-      y: (wp.y - cam.y) * cam.zoom + viewport.h / 2,
-    };
-  }
+  // ---- Drawing primitives ----
 
   function roundRect(ctx, x, y, w, h, r) {
-    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+    const rr = Math.min(r, w/2, h/2);
     ctx.beginPath();
-    ctx.moveTo(x + rr, y);
-    ctx.lineTo(x + w - rr, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
-    ctx.lineTo(x + w, y + h - rr);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
-    ctx.lineTo(x + rr, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
-    ctx.lineTo(x, y + rr);
-    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.moveTo(x+rr, y);
+    ctx.lineTo(x+w-rr, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+rr);
+    ctx.lineTo(x+w, y+h-rr);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-rr, y+h);
+    ctx.lineTo(x+rr, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-rr);
+    ctx.lineTo(x, y+rr);
+    ctx.quadraticCurveTo(x, y, x+rr, y);
     ctx.closePath();
   }
 
-  function drawGrid(ctx, cam, viewport, timeOffset) {
-    const halfW = viewport.w / 2 / cam.zoom;
-    const halfH = viewport.h / 2 / cam.zoom;
-    const wx0 = cam.x - halfW;
-    const wy0 = cam.y - halfH;
-    const wx1 = cam.x + halfW;
-    const wy1 = cam.y + halfH;
-
-    const pitch = GRID_PITCH;
-    const halfPitch = pitch / 2;
-
-    const iy0 = Math.floor(wy0 / pitch) - 1;
-    const iy1 = Math.ceil(wy1 / pitch) + 1;
-    const ix0 = Math.floor(wx0 / pitch) - 1;
-    const ix1 = Math.ceil(wx1 / pitch) + 1;
-
+  function drawGrid(ctx, cam, vw, vh) {
     ctx.save();
-    ctx.globalAlpha = 0.18;
     ctx.fillStyle = THEME.gridDot;
-    const dotR = 1.5;
-    for (let iy = iy0; iy <= iy1; iy++) {
-      const wy = iy * pitch;
-      const offset = (iy & 1) ? halfPitch : 0;
-      for (let ix = ix0; ix <= ix1; ix++) {
-        const wx = ix * pitch + offset;
-        const sp = w2s(cam, { x: wx, y: wy }, viewport);
-        if (sp.x < -4 || sp.x > viewport.w + 4 || sp.y < -4 || sp.y > viewport.h + 4) continue;
+    const pitch = 20;
+    const halfW = vw / 2 / cam.zoom;
+    const halfH = vh / 2 / cam.zoom;
+    const x0 = Math.floor((cam.x - halfW) / pitch) * pitch;
+    const x1 = Math.ceil((cam.x + halfW) / pitch) * pitch;
+    const y0 = Math.floor((cam.y - halfH) / pitch) * pitch;
+    const y1 = Math.ceil((cam.y + halfH) / pitch) * pitch;
+    const r = Math.max(0.8, cam.zoom * 0.9);
+    for (let wy = y0; wy <= y1; wy += pitch) {
+      for (let wx = x0; wx <= x1; wx += pitch) {
+        const sp = w2s(cam, wx, wy, vw, vh);
         ctx.beginPath();
-        ctx.arc(sp.x, sp.y, dotR, 0, Math.PI * 2);
+        ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
         ctx.fill();
       }
     }
     ctx.restore();
   }
 
-  // ---- Orthogonal wire path + point-along-path helpers ----
+  // ---- ANSI gate shapes. All drawn in world coords; caller sets transform. ----
 
-  // Returns the polyline vertices (in world space) for a wire between fp -> tp.
-  // Three segments: H, V, H, passing through midX.
-  function wirePath(fp, tp) {
-    const midX = (fp.x + tp.x) / 2;
-    return [
-      { x: fp.x, y: fp.y },
-      { x: midX, y: fp.y },
-      { x: midX, y: tp.y },
-      { x: tp.x, y: tp.y },
-    ];
+  function pathAND(ctx, x, y, w, h) {
+    // flat-left, domed-right
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w/2, y);
+    ctx.arc(x + w/2, y + h/2, h/2, -Math.PI/2, Math.PI/2);
+    ctx.lineTo(x, y + h);
+    ctx.closePath();
   }
 
-  function pathLength(pts) {
-    let L = 0;
-    for (let i = 1; i < pts.length; i++) {
-      L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    }
-    return L;
+  function pathOR(ctx, x, y, w, h) {
+    // curved left, pointed right
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    // top edge: curves right then out to the point
+    ctx.quadraticCurveTo(x + w*0.5, y, x + w, y + h/2);
+    ctx.quadraticCurveTo(x + w*0.5, y + h, x, y + h);
+    // back curve (concave left)
+    ctx.quadraticCurveTo(x + w*0.2, y + h/2, x, y);
+    ctx.closePath();
   }
 
-  // Walk along `pts` for `dist` units; return { x, y } or null if past end.
-  function pointAlong(pts, dist) {
-    if (dist < 0) return null;
-    let remain = dist;
-    for (let i = 1; i < pts.length; i++) {
-      const ax = pts[i - 1].x, ay = pts[i - 1].y;
-      const bx = pts[i].x,     by = pts[i].y;
-      const seg = Math.hypot(bx - ax, by - ay);
-      if (seg <= 0) continue;
-      if (remain <= seg) {
-        const t = remain / seg;
-        return { x: ax + (bx - ax) * t, y: ay + (by - ay) * t };
-      }
-      remain -= seg;
+  function drawBubble(ctx, cx, cy, r) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  function drawGateShape(ctx, node, opts) {
+    const b = gateBounds(node);
+    const custom = isCustomType(node);
+    const stroke = custom ? THEME.customStroke : THEME.gateStroke;
+    const fill = THEME.gateFill;
+    ctx.save();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = opts.hover ? '#ffffff' : stroke;
+    ctx.fillStyle = fill;
+
+    const t = node.type;
+    if (custom) {
+      roundRect(ctx, b.x, b.y, b.w, b.h, 6);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = THEME.textFg;
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t, b.x + b.w/2, b.y + b.h/2);
+    } else if (t === 'AND' || t === 'NAND') {
+      pathAND(ctx, b.x + 4, b.y, b.w - 12, b.h);
+      ctx.fill(); ctx.stroke();
+      if (t === 'NAND') drawBubble(ctx, b.x + b.w - 3, b.y + b.h/2, 3);
+    } else if (t === 'OR' || t === 'NOR') {
+      pathOR(ctx, b.x + 4, b.y, b.w - 12, b.h);
+      ctx.fill(); ctx.stroke();
+      if (t === 'NOR') drawBubble(ctx, b.x + b.w - 3, b.y + b.h/2, 3);
+    } else if (t === 'XOR' || t === 'XNOR') {
+      // second curve behind
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.quadraticCurveTo(b.x + 8, b.y + b.h/2, b.x, b.y + b.h);
+      ctx.stroke();
+      pathOR(ctx, b.x + 8, b.y, b.w - 16, b.h);
+      ctx.fill(); ctx.stroke();
+      if (t === 'XNOR') drawBubble(ctx, b.x + b.w - 3, b.y + b.h/2, 3);
+    } else if (t === 'NOT') {
+      ctx.beginPath();
+      ctx.moveTo(b.x + 4, b.y);
+      ctx.lineTo(b.x + b.w - 10, b.y + b.h/2);
+      ctx.lineTo(b.x + 4, b.y + b.h);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      drawBubble(ctx, b.x + b.w - 5, b.y + b.h/2, 3);
+    } else if (t === 'INPUT' || t === 'OUTPUT') {
+      roundRect(ctx, b.x, b.y, b.w, b.h, b.h / 2);
+      ctx.fill(); ctx.stroke();
+      const live = opts.liveValue;
+      const dotColor = live === 1 ? THEME.on : '#3a4258';
+      ctx.fillStyle = dotColor;
+      ctx.beginPath();
+      const dotX = t === 'INPUT' ? b.x + 12 : b.x + b.w - 12;
+      ctx.arc(dotX, b.y + b.h/2, 4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = THEME.textFg;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = (node.props && node.props.label) ? node.props.label : t;
+      ctx.fillText(label, b.x + b.w/2 + (t === 'INPUT' ? 4 : -4), b.y + b.h/2);
+    } else if (t === 'CLOCK') {
+      roundRect(ctx, b.x + 6, b.y + 4, b.w - 12, b.h - 8, 3);
+      ctx.fill(); ctx.stroke();
+      // square-wave glyph
+      ctx.beginPath();
+      const gx = b.x + 14, gy = b.y + b.h/2, gw = b.w - 28, gh = 8;
+      ctx.moveTo(gx, gy + gh/2);
+      ctx.lineTo(gx, gy - gh/2);
+      ctx.lineTo(gx + gw/2, gy - gh/2);
+      ctx.lineTo(gx + gw/2, gy + gh/2);
+      ctx.lineTo(gx + gw, gy + gh/2);
+      ctx.stroke();
+    } else if (t === 'CONST0' || t === 'CONST1') {
+      ctx.beginPath();
+      ctx.arc(b.x + b.w/2, b.y + b.h/2, Math.min(b.w, b.h)/2 - 4, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = THEME.textFg;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t === 'CONST1' ? '1' : '0', b.x + b.w/2, b.y + b.h/2);
+    } else if (t === 'DLATCH' || t === 'DFF' || t === 'SRLATCH') {
+      roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = THEME.textFg;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t, b.x + b.w/2, b.y + b.h/2);
+    } else {
+      // fallback rounded rect
+      roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = THEME.textFg;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t, b.x + b.w/2, b.y + b.h/2);
     }
+
+    if (opts.selected) {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = THEME.select;
+      roundRect(ctx, b.x - 3, b.y - 3, b.w + 6, b.h + 6, 5);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawPorts(ctx, node, opts, circuit) {
+    const layout = pinLayoutFor(node, circuit);
+    ctx.save();
+    const all = layout.inputs.concat(layout.outputs);
+    for (const p of all) {
+      const pp = portPos(node, p, circuit);
+      const isHover = opts.hoverPin === p;
+      ctx.fillStyle = isHover ? '#ffffff' : THEME.textDim;
+      ctx.strokeStyle = THEME.gateStroke;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(pp.x, pp.y, PORT_R / (opts.zoom || 1), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Live value lookup from compiled graph.
+  function liveValue(graph, nodeId, pin) {
+    if (!graph || !graph.nodes) return null;
+    const n = (typeof graph.nodes.get === 'function') ? graph.nodes.get(nodeId) : graph.nodes[nodeId];
+    if (!n) return null;
+    if (n.out && pin in n.out) return n.out[pin];
+    if (n.state && pin in n.state) return n.state[pin];
     return null;
   }
 
-  function drawWire(ctx, from, to, cam, viewport, state) {
-    const a = w2s(cam, from, viewport);
-    const b = w2s(cam, to, viewport);
-    const midX = (a.x + b.x) / 2;
-    const r = NODE_R;
+  function drawWire(ctx, fp, tp, signal) {
+    // 2-segment orthogonal: H, V, H using midX
+    const midX = (fp.x + tp.x) / 2;
     ctx.save();
-    let color, width;
-    if (state === 'active') { color = THEME.wireActive; width = 2.2; }
-    else if (state === 'conflict') { color = THEME.warn; width = 2.2; }
-    else if (state === 'z') { color = THEME.wireDim; width = 1.6; }
-    else { color = THEME.wire; width = 1.8; }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
+    if (signal === 1) {
+      ctx.strokeStyle = THEME.wireHi;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = THEME.wireHi;
+      ctx.shadowBlur = 6;
+    } else {
+      ctx.strokeStyle = THEME.wireLo;
+      ctx.lineWidth = 1.5;
+    }
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    const dirX1 = midX >= a.x ? 1 : -1;
-    const dirY = b.y >= a.y ? 1 : -1;
-    const dirX2 = b.x >= midX ? 1 : -1;
-    ctx.lineTo(midX - dirX1 * r, a.y);
-    ctx.quadraticCurveTo(midX, a.y, midX, a.y + dirY * r);
-    ctx.lineTo(midX, b.y - dirY * r);
-    ctx.quadraticCurveTo(midX, b.y, midX + dirX2 * r, b.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(fp.x, fp.y);
+    ctx.lineTo(midX, fp.y);
+    ctx.lineTo(midX, tp.y);
+    ctx.lineTo(tp.x, tp.y);
     ctx.stroke();
-    ctx.restore();
-  }
-
-  // ---- Node rendering ----
-
-  function getGlyphs() {
-    if (typeof window !== 'undefined' && window.NDP && window.NDP.Sand && window.NDP.Sand.Glyphs) {
-      return window.NDP.Sand.Glyphs;
-    }
-    return null;
-  }
-
-  function drawNode(ctx, node, cam, viewport, opts) {
-    const { w, h } = nodeSize(node);
-    const topLeft = w2s(cam, { x: node.x - w / 2, y: node.y - h / 2 }, viewport);
-    const sw = w * cam.zoom;
-    const sh = h * cam.zoom;
-    const selected = !!opts.selected;
-    const conflict = !!opts.conflict;
-    const t = opts.time || 0;
-
-    ctx.save();
-
-    // Shadow (outer bottom-right)
-    roundRect(ctx, topLeft.x + 1, topLeft.y + 2, sw, sh, NODE_R);
-    ctx.fillStyle = THEME.nodeShadow;
-    ctx.globalAlpha = 0.55;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Body with subtle vertical gradient
-    roundRect(ctx, topLeft.x, topLeft.y, sw, sh, NODE_R);
-    const grad = ctx.createLinearGradient(topLeft.x, topLeft.y, topLeft.x, topLeft.y + sh);
-    grad.addColorStop(0, THEME.nodeFillHi);
-    grad.addColorStop(1, THEME.nodeFill);
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Black-box compiled components: animated gradient sweep on face.
-    if (opts.isBlackBox) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      const sweepX = topLeft.x + ((t * 80) % (sw + 40)) - 20;
-      const sg = ctx.createLinearGradient(sweepX - 20, 0, sweepX + 20, 0);
-      sg.addColorStop(0, 'rgba(255,204,51,0)');
-      sg.addColorStop(0.5, 'rgba(255,204,51,0.18)');
-      sg.addColorStop(1, 'rgba(255,204,51,0)');
-      roundRect(ctx, topLeft.x, topLeft.y, sw, sh, NODE_R);
-      ctx.fillStyle = sg;
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Inner highlight (top-left bevel)
-    ctx.save();
-    roundRect(ctx, topLeft.x + 0.5, topLeft.y + 0.5, sw - 1, sh - 1, NODE_R - 1);
-    ctx.strokeStyle = THEME.nodeInner;
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-
-    // Main stroke
-    roundRect(ctx, topLeft.x, topLeft.y, sw, sh, NODE_R);
-    ctx.lineWidth = selected ? 2 : 1;
-    ctx.strokeStyle = selected ? THEME.nodeSelected : THEME.nodeStroke;
-    ctx.stroke();
-
-    // Glyph
-    const glyphs = getGlyphs();
-    const cx = topLeft.x + sw / 2;
-    const cy = topLeft.y + sh / 2;
-    const label = (node.props && node.props.label) ? node.props.label : null;
-    const isPad = node.type === 'pad_in' || node.type === 'pad_out';
-
-    let drewGlyph = false;
-    if (glyphs) {
-      drewGlyph = glyphs.draw(ctx, node.type, cx, cy, Math.min(sw, sh) * 0.85, THEME.fg, label);
-    }
-    if (!drewGlyph) {
-      // Fallback: text label of type
-      const textLabel = label || node.type;
-      ctx.fillStyle = THEME.fg;
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(textLabel, cx, cy);
-    }
-
-    // Pad type subscript
-    if (isPad && label) {
-      ctx.fillStyle = THEME.accent;
-      ctx.font = '9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText(node.type, cx, topLeft.y + sh + 2);
-    }
-
-    // Selection double-ring pulse
-    if (selected) {
-      const pulse = 0.5 + 0.5 * Math.sin(t * 5);
-      ctx.save();
-      ctx.strokeStyle = THEME.accent;
-      ctx.globalAlpha = 0.35 + 0.35 * pulse;
-      ctx.lineWidth = 2;
-      roundRect(ctx, topLeft.x - 3, topLeft.y - 3, sw + 6, sh + 6, NODE_R + 3);
-      ctx.stroke();
-      ctx.globalAlpha = 0.18 + 0.18 * (1 - pulse);
-      roundRect(ctx, topLeft.x - 6, topLeft.y - 6, sw + 12, sh + 12, NODE_R + 6);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Conflict throb (red outline pulsing)
-    if (conflict) {
-      const throb = 0.5 + 0.5 * Math.sin(t * 3);
-      ctx.save();
-      ctx.strokeStyle = THEME.warn;
-      ctx.globalAlpha = 0.35 + 0.45 * throb;
-      ctx.lineWidth = 2;
-      roundRect(ctx, topLeft.x - 2, topLeft.y - 2, sw + 4, sh + 4, NODE_R + 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    ctx.restore();
-  }
-
-  function drawPins(ctx, node, cam, viewport, signals) {
-    const pins = pinsFor(node);
-    ctx.save();
-    for (const dir of ['in', 'out']) {
-      for (const name of pins[dir]) {
-        const wp = pinPosition(node, name);
-        const sp = w2s(cam, wp, viewport);
-        const sig = signals && signals[node.id] ? signals[node.id][name] : undefined;
-        const active = sig === 1 && dir === 'out';
-        if (active) {
-          // soft corona
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          const hue = hueForId(node.id);
-          ctx.fillStyle = hslStr(hue, 90, 60, 0.55);
-          ctx.shadowColor = hslStr(hue, 95, 65);
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.arc(sp.x, sp.y, PIN_R * 1.8, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-        ctx.fillStyle = THEME.pin;
-        ctx.beginPath();
-        ctx.arc(sp.x, sp.y, PIN_R, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-  }
-
-  // ---- Particle system (internal module state) ----
-
-  const PARTICLE_CAP = 400;
-  // Pool: each particle = { active, wireId, pts, len, pos, speed, hue, life }
-  const _particles = [];
-  const _emitAccum = Object.create(null); // wireId -> seconds since last emit
-  let _timeAccum = 0;
-
-  function acquireParticle() {
-    for (let i = 0; i < _particles.length; i++) {
-      if (!_particles[i].active) return _particles[i];
-    }
-    if (_particles.length >= PARTICLE_CAP) return null;
-    const p = { active: false };
-    _particles.push(p);
-    return p;
-  }
-
-  function resetParticles() {
-    for (let i = 0; i < _particles.length; i++) _particles[i].active = false;
-    for (const k of Object.keys(_emitAccum)) delete _emitAccum[k];
-  }
-
-  function updateAndDrawParticles(ctx, graph, signals, cam, viewport, dt) {
-    // Emit particles from active wires.
-    if (dt > 0) {
-      for (const wid of Object.keys(graph.wires)) {
-        const wire = graph.wires[wid];
-        const fromNode = graph.nodes[wire.from.node];
-        const toNode = graph.nodes[wire.to.node];
-        if (!fromNode || !toNode) continue;
-        const sigFrom = signals[wire.from.node];
-        const src = sigFrom ? sigFrom[wire.from.pin] : undefined;
-        if (src !== 1) { _emitAccum[wid] = 0; continue; }
-        _emitAccum[wid] = (_emitAccum[wid] || 0) + dt;
-        const emitEvery = 0.1; // 100ms
-        while (_emitAccum[wid] >= emitEvery) {
-          _emitAccum[wid] -= emitEvery;
-          const p = acquireParticle();
-          if (!p) break;
-          const fp = pinPosition(fromNode, wire.from.pin);
-          const tp = pinPosition(toNode, wire.to.pin);
-          const pts = wirePath(fp, tp);
-          p.active = true;
-          p.wireId = wid;
-          p.pts = pts;
-          p.len = pathLength(pts);
-          p.pos = 0;
-          p.speed = 500; // world units per second
-          p.hue = hueForId(wire.from.node);
-        }
-      }
-    }
-
-    // Advance + draw.
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < _particles.length; i++) {
-      const p = _particles[i];
-      if (!p.active) continue;
-      if (dt > 0) p.pos += p.speed * dt;
-      if (p.pos >= p.len) { p.active = false; continue; }
-      const wp = pointAlong(p.pts, p.pos);
-      if (!wp) { p.active = false; continue; }
-      const sp = w2s(cam, wp, viewport);
-      // glow halo
-      ctx.fillStyle = hslStr(p.hue, 90, 55, 0.35);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, 9, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = hslStr(p.hue, 95, 70, 0.7);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      // core
-      ctx.fillStyle = hslStr(p.hue, 100, 92);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  // ---- Oscilloscope strip ----
-
-  function drawScope(ctx, viewport, scope, graph) {
-    if (!scope || !scope.length) return;
-    const H = 64;
-    const y0 = viewport.h - H;
-    ctx.save();
-    // bg
-    ctx.fillStyle = THEME.scopeBg;
-    ctx.fillRect(0, y0, viewport.w, H);
-    // top border
-    ctx.strokeStyle = 'rgba(255,204,51,0.28)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, y0 + 0.5);
-    ctx.lineTo(viewport.w, y0 + 0.5);
-    ctx.stroke();
-
-    // Label
-    ctx.fillStyle = THEME.scopeFg;
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('SCOPE', 6, y0 + 4);
-
-    // Figure out clock node id for hue.
-    let clockId = null;
-    for (const id of Object.keys(graph.nodes)) {
-      if (graph.nodes[id].type === 'clock') { clockId = id; break; }
-    }
-    const hue = clockId ? hueForId(clockId) : 50;
-
-    // Plot last 128 samples of clock trace (item = [tick, value]).
-    const N = 128;
-    const start = Math.max(0, scope.length - N);
-    const slice = scope.slice(start);
-    const xStep = viewport.w / N;
-    const traceTop = y0 + 18;
-    const traceH = H - 26;
-
-    // guides
-    ctx.strokeStyle = 'rgba(138,160,184,0.18)';
-    ctx.beginPath();
-    ctx.moveTo(0, traceTop + traceH);
-    ctx.lineTo(viewport.w, traceTop + traceH);
-    ctx.moveTo(0, traceTop);
-    ctx.lineTo(viewport.w, traceTop);
-    ctx.stroke();
-
-    // trace
-    ctx.strokeStyle = hslStr(hue, 95, 65);
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let i = 0; i < slice.length; i++) {
-      const v = slice[i][1];
-      const x = i * xStep;
-      const y = v === 1 ? traceTop : (traceTop + traceH);
-      if (i === 0) ctx.moveTo(x, y);
-      else {
-        ctx.lineTo(x, y); // vertical edge first via last y — keeps square wave look
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // ---- Pass celebration flash overlay ----
-
-  function drawFlash(ctx, viewport, flash) {
-    if (!flash || !flash.active) return;
-    const p = Math.max(0, Math.min(1, flash.t / flash.duration));
-    const alpha = 0.35 * (1 - p) + 0.15 * Math.sin(p * Math.PI * 4) * (1 - p);
-    ctx.save();
-    ctx.fillStyle = 'rgba(255,204,51,' + Math.max(0, alpha).toFixed(3) + ')';
-    ctx.fillRect(0, 0, viewport.w, viewport.h);
     ctx.restore();
   }
 
   // ---- Main draw ----
 
-  function draw(ctx, opts) {
-    const { graph, camera, viewport } = opts;
-    const signals = opts.signals || {};
-    const selection = opts.selection || { nodes: {}, wires: {} };
-    const pendingWire = opts.pendingWire || null;
-    const boxSelect = opts.boxSelect || null;
-    const dt = typeof opts.dt === 'number' ? Math.max(0, Math.min(0.1, opts.dt)) : 0;
-    const scope = opts.scope || null;
-    const flash = opts.flash || null;
-    _timeAccum += dt;
-    const time = _timeAccum;
+  function draw(ctx, state) {
+    const { circuit, graph, camera, canvasW, canvasH, hover, selection, dragGhost, dragWire } = state;
+    const vw = canvasW, vh = canvasH;
+    camera._vw = vw; camera._vh = vh;
 
-    // 1. background
+    // background
+    ctx.save();
     ctx.fillStyle = THEME.bg;
-    ctx.fillRect(0, 0, viewport.w, viewport.h);
+    ctx.fillRect(0, 0, vw, vh);
+    ctx.restore();
 
-    // radial vignette for silicon feel
-    const vg = ctx.createRadialGradient(viewport.w / 2, viewport.h / 2, 50,
-                                        viewport.w / 2, viewport.h / 2, Math.max(viewport.w, viewport.h));
-    vg.addColorStop(0, 'rgba(255,204,51,0.05)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.35)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, viewport.w, viewport.h);
+    drawGrid(ctx, camera, vw, vh);
 
-    // 2. lattice grid
-    drawGrid(ctx, camera, viewport, time);
+    // Apply camera transform so all world-space drawing is straight math.
+    ctx.save();
+    ctx.translate(vw/2, vh/2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
 
-    // 3. wires (behind nodes)
-    for (const wid of Object.keys(graph.wires)) {
-      const w = graph.wires[wid];
-      const fromNode = graph.nodes[w.from.node];
-      const toNode = graph.nodes[w.to.node];
-      if (!fromNode || !toNode) continue;
-      const fp = pinPosition(fromNode, w.from.pin);
-      const tp = pinPosition(toNode, w.to.pin);
-      const sf = signals[w.from.node];
-      const src = sf ? sf[w.from.pin] : undefined;
-      let state = 'off';
-      if (src === 1) state = 'active';
-      else if (src === 'X') state = 'conflict';
-      else if (src === 'Z' || src === undefined) state = 'z';
-      drawWire(ctx, fp, tp, camera, viewport, state);
+    // wires (under nodes)
+    if (circuit && circuit.wires) {
+      for (const w of circuit.wires) {
+        const fn = circuit.nodes.find(n => n.id === w.from.node);
+        const tn = circuit.nodes.find(n => n.id === w.to.node);
+        if (!fn || !tn) continue;
+        const fp = portPos(fn, w.from.pin, circuit);
+        const tp = portPos(tn, w.to.pin, circuit);
+        const sig = liveValue(graph, w.from.node, w.from.pin);
+        drawWire(ctx, fp, tp, sig);
+      }
     }
 
-    // 4. pending wire preview
-    if (pendingWire && pendingWire.from && pendingWire.cursor) {
-      const fromNode = graph.nodes[pendingWire.from.node];
-      if (fromNode) {
-        const fp = pinPosition(fromNode, pendingWire.from.pin);
+    // nodes
+    if (circuit && circuit.nodes) {
+      for (const node of circuit.nodes) {
+        const selected = selection && (selection.has ? selection.has(node.id) : selection[node.id]);
+        const hov = hover && hover.nodeId === node.id;
+        const live = liveValue(graph, node.id, 'y') || liveValue(graph, node.id, 'a');
+        drawGateShape(ctx, node, {
+          selected: !!selected,
+          hover: !!hov,
+          liveValue: live
+        });
+        drawPorts(ctx, node, {
+          hoverPin: (hover && hover.kind === 'port' && hover.nodeId === node.id) ? hover.pin : null,
+          zoom: camera.zoom
+        }, circuit);
+      }
+    }
+
+    // drag wire (rubber band) — dragWire.x/y are in world coords
+    if (dragWire) {
+      const fn = circuit.nodes.find(n => n.id === dragWire.fromNode);
+      if (fn) {
+        const fp = portPos(fn, dragWire.fromPin, circuit);
         ctx.save();
-        ctx.strokeStyle = THEME.accent;
-        ctx.globalAlpha = 0.7;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        const a = w2s(camera, fp, viewport);
-        const b = w2s(camera, pendingWire.cursor, viewport);
+        ctx.strokeStyle = THEME.wireHi;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
         ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
+        ctx.moveTo(fp.x, fp.y);
+        ctx.lineTo(dragWire.x, dragWire.y);
         ctx.stroke();
         ctx.restore();
       }
     }
 
-    // 5. signal-flow particles (additive, drawn under nodes so nodes occlude)
-    updateAndDrawParticles(ctx, graph, signals, camera, viewport, dt);
-
-    // 6. nodes
-    for (const nid of Object.keys(graph.nodes)) {
-      const node = graph.nodes[nid];
-      const sigs = signals[nid] || {};
-      let conflict = false;
-      const pins = pinsFor(node);
-      for (const pin of pins.out) if (sigs[pin] === 'X') { conflict = true; break; }
-      const isBlackBox = PRIMITIVE_TYPES.indexOf(node.type) < 0;
-      drawNode(ctx, node, camera, viewport, {
-        selected: !!selection.nodes[nid],
-        conflict,
-        isBlackBox,
-        time,
-      });
-    }
-
-    // 7. pins on top
-    for (const nid of Object.keys(graph.nodes)) {
-      drawPins(ctx, graph.nodes[nid], camera, viewport, signals);
-    }
-
-    // 8. box select overlay
-    if (boxSelect) {
+    // drag ghost
+    if (dragGhost) {
+      const ghostNode = { id: '__ghost', type: dragGhost.type, x: dragGhost.x, y: dragGhost.y, props: {} };
       ctx.save();
-      ctx.strokeStyle = THEME.accent;
-      ctx.fillStyle = 'rgba(255,204,51,0.08)';
-      ctx.lineWidth = 1;
-      const x = Math.min(boxSelect.x0, boxSelect.x1);
-      const y = Math.min(boxSelect.y0, boxSelect.y1);
-      const w = Math.abs(boxSelect.x1 - boxSelect.x0);
-      const h = Math.abs(boxSelect.y1 - boxSelect.y0);
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
+      ctx.globalAlpha = 0.6;
+      drawGateShape(ctx, ghostNode, { selected: false, hover: false, liveValue: null });
+      drawPorts(ctx, ghostNode, { hoverPin: null, zoom: camera.zoom }, circuit);
       ctx.restore();
     }
 
-    // 9. oscilloscope strip (if graph has a clock)
-    let hasClock = false;
-    for (const id of Object.keys(graph.nodes)) {
-      if (graph.nodes[id].type === 'clock') { hasClock = true; break; }
-    }
-    if (hasClock && scope) drawScope(ctx, viewport, scope, graph);
-
-    // 10. pass celebration flash
-    if (flash && flash.active) {
-      // advance flash timer
-      if (dt > 0) flash.t += dt;
-      if (flash.t >= flash.duration) flash.active = false;
-      drawFlash(ctx, viewport, flash);
-    }
+    ctx.restore();
   }
 
   const Render = {
     draw,
-    pinPosition,
-    nodeSize,
-    pinsFor,
-    nodeContainsWorld,
-    pickPin,
-    hueForId,
-    wirePath,
-    pathLength,
-    pointAlong,
-    resetParticles,
-    THEME,
-    GRID_PITCH,
+    gateBounds,
+    portPos,
+    portAt,
+    nodeAt,
+    pinLayoutFor,
+    THEME
   };
 
   return { Render };
