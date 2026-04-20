@@ -1566,6 +1566,7 @@
       for (const t of this.towers) this._drawTower(ctx, t);
       // Enemies
       for (const e of this.enemies) this._drawEnemy(ctx, e);
+      if (!O.ParagonCinematic || !O.ParagonCinematic.active(this)) this._drawLeadGlow(ctx);
       // Projectiles
       for (const p of this.projectiles) this._drawProjectile(ctx, p);
 
@@ -1689,6 +1690,21 @@
       ctx.restore();
     }
 
+    _drawLeadGlow(ctx) {
+      if (!this.enemies || !this.enemies.length) return;
+      let lead = this.enemies[0];
+      for (const e of this.enemies) if (e.pathS > lead.pathS) lead = e;
+      ctx.save();
+      ctx.strokeStyle = '#ffd86b';
+      ctx.lineWidth = 2 + Math.sin(this.time * 6) * 0.8;
+      ctx.shadowColor = '#ffd86b';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(lead.x, lead.y, (lead.size || 16) + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     _drawTower(ctx, t) {
       const def = t.stats;
       const symmetric = SYMMETRIC.has(t.key);
@@ -1709,7 +1725,11 @@
         ctx.restore();
       }
       const sz = t.paragon ? 62 : 48;
-      Assets.draw(ctx, def.sprite, t.x + dx, t.y + dy, sz, sz, {
+      const idle = !t.target && (t.cd || 0) > 0.2;
+      const breatheSz = idle
+        ? sz * (1 + 0.025 * Math.sin(this.time * 2 + t.x * 0.01))
+        : sz;
+      Assets.draw(ctx, def.sprite, t.x + dx, t.y + dy, breatheSz, breatheSz, {
         rot,
         fallback: () => {
           ctx.fillStyle = def.color || '#888';
