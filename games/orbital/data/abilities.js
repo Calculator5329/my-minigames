@@ -323,6 +323,85 @@
         }
         g.flashMessage('STASIS FIELD', '#8a6cd8');
       }
+    },
+
+    // ---- PARAGONS ----
+    paragonBoltStorm: {
+      label: 'Bolt Storm', desc: '40 bolts in a fan',
+      cd: 75, glyph: 'burst', color: '#ffd86b',
+      activate(game, t) {
+        for (let i = 0; i < 40; i++) {
+          const ang = (i / 40) * Math.PI * 2;
+          game.projectiles.push({
+            x: t.x, y: t.y, vx: Math.cos(ang) * 720, vy: Math.sin(ang) * 720,
+            dmg: 20, pierce: 6, life: 1.6, type: 'bolt', fromTower: t,
+            color: '#ffd86b'
+          });
+        }
+        game.flashMessage('BOLT STORM', '#ffd86b');
+      }
+    },
+    paragonOrbitalDrop: {
+      label: 'Orbital Drop', desc: 'screen-shaking mega shell',
+      cd: 90, glyph: 'nuke', color: '#ff5530',
+      activate(game, t) {
+        let lead = null, ld = -Infinity;
+        for (const e of game.enemies) if (e.pathS > ld) { lead = e; ld = e.pathS; }
+        const tx = lead ? lead.x : (game.canvas ? game.canvas.width / 2 : t.x);
+        const ty = lead ? lead.y : (game.canvas ? game.canvas.height / 2 : t.y);
+        for (const e of game.enemies) {
+          const d2 = (e.x - tx) ** 2 + (e.y - ty) ** 2;
+          if (d2 <= 200 * 200) game.damage(e, 600, 'orbital');
+        }
+        game.particles.add(tx, ty, '#ff5530',
+          { count: 80, life: 1.2, speed: 360, size: 6 });
+        game.flash('#ff5530', 0.6);
+        game.flashMessage('ORBITAL DROP', '#ff5530');
+      }
+    },
+    paragonSunburn: {
+      label: 'Sunburn', desc: 'all enemies burn 8s',
+      cd: 75, glyph: 'burn', color: '#ffd86b',
+      activate(game, t) {
+        for (const e of game.enemies) {
+          e.burnT = 8; e.burnDps = 40; e.burnSource = t;
+        }
+        game.flash('#ffd86b', 0.4);
+        game.flashMessage('SUNBURN', '#ffd86b');
+      }
+    },
+    paragonCollapseAll: {
+      label: 'Total Collapse', desc: 'map-wide gravity stun 5s',
+      cd: 90, glyph: 'star', color: '#a070ff',
+      activate(game, t) {
+        for (const e of game.enemies) e.stunUntil = game.time + 5;
+        game.flash('#a070ff', 0.5);
+        game.flashMessage('TOTAL COLLAPSE', '#a070ff');
+      }
+    },
+    paragonMIRV: {
+      label: 'MIRV Strike', desc: '8 autonomous warheads',
+      cd: 80, glyph: 'nuke', color: '#ff8040',
+      activate(game, t) {
+        const targets = game.enemies.slice()
+          .sort((a, b) => b.maxHp - a.maxHp).slice(0, 8);
+        for (const e of targets) {
+          if (game._abilityICBM) game._abilityICBM(t, e.x, e.y);
+        }
+        game.flashMessage('MIRV STRIKE', '#ff8040');
+      }
+    },
+    paragonErase: {
+      label: 'Erase', desc: 'instakill top 5 non-bosses',
+      cd: 60, glyph: 'crit', color: '#7ae0ff',
+      activate(game, t) {
+        const list = game.enemies.filter(e => !e.boss)
+          .sort((a, b) => b.maxHp - a.maxHp);
+        for (let i = 0; i < Math.min(5, list.length); i++) {
+          game.damage(list[i], 999999, 'sniper');
+        }
+        game.flashMessage('ERASE', '#7ae0ff');
+      }
     }
   };
 
