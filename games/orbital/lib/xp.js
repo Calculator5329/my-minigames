@@ -33,7 +33,7 @@
 
   // Award XP. Returns true if a new level was reached (caller can flash).
   function grant(tower, amount) {
-    if (tower && tower.paragon) return false;
+    if (tower && (tower.paragon || tower.key === 'commander')) return false;
     if (!tower) return false;
     if (amount <= 0) return false;
     if (tower.key && O.Persist && O.Persist.addLifetimeXp) {

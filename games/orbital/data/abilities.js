@@ -368,7 +368,9 @@
       cd: 25, glyph: 'burst', color: '#ffd86b',
       activate(g, t) {
         const cap = t.stats.mineCap || 3;
-        for (let i = 0; i < cap; i++) {
+        const live = (g.mines || []).filter(m => m.owner === t).length;
+        const need = Math.max(0, cap - live);
+        for (let i = 0; i < need; i++) {
           setTimeout(() => { if (g._plantMine) g._plantMine(t, true); }, i * 60);
         }
         g.flashMessage('SATURATION', '#ffd86b');

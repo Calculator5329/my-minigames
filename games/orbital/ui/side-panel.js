@@ -572,9 +572,11 @@
       y += Math.ceil(stats.length / 2) * 14 + 6;
 
       // Path A + B trees
-      y = this._drawPathTree(ctx, game, t, spec, 'A', x, y, w);
-      y += 6;
-      y = this._drawPathTree(ctx, game, t, spec, 'B', x, y, w);
+      if (!t.paragon) {
+        y = this._drawPathTree(ctx, game, t, spec, 'A', x, y, w);
+        y += 6;
+        y = this._drawPathTree(ctx, game, t, spec, 'B', x, y, w);
+      }
       y = this._drawParagonTile(ctx, game, t, spec, x, y, w);
 
       // Footer area: target / abilities / sell

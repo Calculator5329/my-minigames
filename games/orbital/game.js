@@ -268,7 +268,7 @@
         this.flashMessage('PARAGON: ' + res.error, '#ff5566');
         return;
       }
-      this.cash -= res.cost;
+      this.spendCash(res.cost);
       this.flashMessage('\u2605 ' + res.name + ' AWAKENED', '#ffd86b');
       if (O.ParagonCinematic) {
         O.ParagonCinematic.start(this, t, O.Towers.get(t.key).paragon);
@@ -995,7 +995,7 @@
       if (!this.mines) this.mines = [];
       const live = this.mines.filter(m => m.owner === t);
       const cap = (t.stats.mineCap || 3);
-      if (!fromAbility && live.length >= cap) return;
+      if (live.length >= cap) return;
       const r = t.stats.range;
       const r2 = r * r;
       let best = null;
