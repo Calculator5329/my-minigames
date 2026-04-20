@@ -1,247 +1,439 @@
 // games/sand/lib/input-workspace.js
-// Dual-entry module: works in Node (CommonJS) and in the browser (window.NDP.Sand.Workspace).
-// Workspace input controller: pan / zoom / move / wire / delete / undo / box-select.
-//
-// The controller attaches raw DOM listeners to a canvas and mutates shared
-// workspace state (camera, graph, selection, pending wire, history).
+// Dual-entry module: Node CommonJS + window.NDP.Sand.InputWorkspace.
+// Canvas input controller for the sand v2 workspace.
 
 (function (root, factory) {
   const mod = factory();
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = mod.Workspace;
-    module.exports.Workspace = mod.Workspace;
+    module.exports = mod;
+    module.exports.InputWorkspace = mod.InputWorkspace;
   }
   if (typeof window !== 'undefined') {
     window.NDP = window.NDP || {};
     window.NDP.Sand = window.NDP.Sand || {};
-    window.NDP.Sand.Workspace = mod.Workspace;
+    window.NDP.Sand.InputWorkspace = mod.InputWorkspace;
   }
 })(typeof self !== 'undefined' ? self : this, function () {
-  const PIN_HIT_WORLD = 10; // world-space pick radius for pins
+  const GRID = 20;
+  const PORT_SLACK = 10;
+  const DRAG_THRESHOLD = 3;
 
-  function canvasPoint(canvas, e) {
+  const PIN_LAYOUT = {
+    NOT:    { inputs: ['a'],          outputs: ['y'] },
+    AND:    { inputs: ['a','b'],      outputs: ['y'] },
+    OR:     { inputs: ['a','b'],      outputs: ['y'] },
+    NAND:   { inputs: ['a','b'],      outputs: ['y'] },
+    NOR:    { inputs: ['a','b'],      outputs: ['y'] },
+    XOR:    { inputs: ['a','b'],      outputs: ['y'] },
+    XNOR:   { inputs: ['a','b'],      outputs: ['y'] },
+    INPUT:  { inputs: [],             outputs: ['y'] },
+    OUTPUT: { inputs: ['a'],          outputs: [] },
+    CLOCK:  { inputs: [],             outputs: ['y'] },
+    CONST0: { inputs: [],             outputs: ['y'] },
+    CONST1: { inputs: [],             outputs: ['y'] },
+    DLATCH: { inputs: ['d','en'],     outputs: ['q','qn'] },
+    DFF:    { inputs: ['d','clk'],    outputs: ['q','qn'] },
+    SRLATCH:{ inputs: ['s','r'],      outputs: ['q','qn'] }
+  };
+
+  function layoutFor(node, circuit) {
+    if (PIN_LAYOUT[node.type]) return PIN_LAYOUT[node.type];
+    const gates = (typeof window !== 'undefined' && window.NDP && window.NDP.Sand && window.NDP.Sand.Gates) ? window.NDP.Sand.Gates : null;
+    if (gates && gates.primitives && gates.primitives[node.type]) {
+      const p = gates.primitives[node.type];
+      if (p.inputs && p.outputs) return { inputs: p.inputs.slice(), outputs: p.outputs.slice() };
+    }
+    if (circuit && circuit.customGatePinLayouts && circuit.customGatePinLayouts[node.type]) {
+      return circuit.customGatePinLayouts[node.type];
+    }
+    return { inputs: ['a','b'], outputs: ['y'] };
+  }
+
+  function defaultProps(type) {
+    if (type === 'INPUT') return { label: 'A', value: 0 };
+    if (type === 'OUTPUT') return { label: 'Y' };
+    return {};
+  }
+
+  function snap(v) { return Math.round(v / GRID) * GRID; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function canvasLocal(canvas, clientX, clientY) {
     const r = canvas.getBoundingClientRect();
     const sx = canvas.width / r.width;
     const sy = canvas.height / r.height;
     return {
-      x: (e.clientX - r.left) * sx,
-      y: (e.clientY - r.top) * sy,
+      x: (clientX - r.left) * sx,
+      y: (clientY - r.top) * sy,
+      inside: clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
     };
   }
 
-  function create(opts) {
-    const { canvas, getState, setGraph, deps } = opts;
-    // deps: { Camera, Model, History, Render }
-    const state = {
-      // active interaction mode: 'idle' | 'pan' | 'move' | 'box' | 'wire'
-      mode: 'idle',
-      dragLast: null,      // last screen pt during pan/move
-      dragNodeId: null,    // node being dragged
-      boxStart: null,      // screen pt when box-select began
-      boxCur: null,
-      spaceHeld: false,
+  function viewport(canvas) { return { w: canvas.width, h: canvas.height }; }
+
+  function screenToWorld(camera, sx, sy, vp) {
+    return {
+      x: (sx - vp.w / 2) / camera.zoom + camera.x,
+      y: (sy - vp.h / 2) / camera.zoom + camera.y
     };
+  }
 
-    function getWorkspace() { return getState(); }
-    function viewport() { return { w: canvas.width, h: canvas.height }; }
+  function findNode(circuit, id) {
+    for (const n of circuit.nodes) if (n.id === id) return n;
+    return null;
+  }
 
-    function onMouseDown(e) {
-      const ws = getWorkspace();
-      const sp = canvasPoint(canvas, e);
-      const wp = deps.Camera.screenToWorld(ws.camera, sp, viewport());
+  function create(opts) {
+    const canvas = opts.canvas;
+    const getState = opts.getState;
+    const onChange = opts.onChange || (() => {});
+    const onPanZoom = opts.onPanZoom || (() => {});
+    const onSelect = opts.onSelect || (() => {});
+    const onDragGhost = opts.onDragGhost || (() => {});
+    const onDragWire = opts.onDragWire || (() => {});
+    const onInputToggle = opts.onInputToggle || (() => {});
+
+    // Interaction state
+    let selection = new Set();
+    let mode = 'idle'; // 'idle' | 'palette' | 'wire' | 'move' | 'pan' | 'press'
+    let palette = null; // { type, sx, sy }
+    let wire = null;    // { fromNode, fromPin }
+    let move = null;    // { ids:[], lastSx, lastSy, moved }
+    let pan = null;     // { lastSx, lastSy }
+    let press = null;   // { nodeId, sx, sy, moved, additive }
+    let activePointerId = null;
+
+    function emitSelect() { onSelect(new Set(selection)); }
+
+    function getCircuit() { return getState().circuit; }
+    function getCamera() { return getState().camera; }
+    function getMode() { return getState().mode; }
+
+    function tagCameraViewport(camera) {
+      // Render's portAt / nodeAt use camera._vw / _vh. Keep them fresh.
+      camera._vw = canvas.width;
+      camera._vh = canvas.height;
+    }
+
+    function hitPort(circuit, camera, sx, sy) {
+      tagCameraViewport(camera);
+      for (let i = circuit.nodes.length - 1; i >= 0; i--) {
+        const n = circuit.nodes[i];
+        const Render = (typeof window !== 'undefined' && window.NDP && window.NDP.Sand && window.NDP.Sand.Render) || null;
+        let pin = null;
+        if (Render && Render.portAt) {
+          pin = Render.portAt(camera, n, sx, sy, PORT_SLACK, circuit);
+        }
+        if (pin) {
+          const lay = layoutFor(n, circuit);
+          const dir = lay.inputs.indexOf(pin) >= 0 ? 'in'
+                    : lay.outputs.indexOf(pin) >= 0 ? 'out' : null;
+          if (dir) return { node: n.id, pin, dir };
+        }
+      }
+      return null;
+    }
+
+    function hitNode(circuit, camera, sx, sy) {
+      tagCameraViewport(camera);
+      const Render = (typeof window !== 'undefined' && window.NDP && window.NDP.Sand && window.NDP.Sand.Render) || null;
+      if (Render && Render.nodeAt) return Render.nodeAt(camera, circuit, sx, sy);
+      return null;
+    }
+
+    // ---- Palette drag (initiated externally) ----
+    function startPaletteDrag(type, sx, sy) {
+      palette = { type, sx, sy };
+      mode = 'palette';
+      const camera = getCamera();
+      const local = relFromClient(sx, sy);
+      const wp = screenToWorld(camera, local.x, local.y, viewport(canvas));
+      onDragGhost({ type, x: wp.x, y: wp.y });
+    }
+
+    function relFromClient(clientX, clientY) {
+      const r = canvas.getBoundingClientRect();
+      const sx = canvas.width / r.width;
+      const sy = canvas.height / r.height;
+      return {
+        x: (clientX - r.left) * sx,
+        y: (clientY - r.top) * sy,
+        inside: clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
+      };
+    }
+
+    // ---- Pointer handlers ----
+
+    function onPointerDown(e) {
+      const circuit = getCircuit();
+      const camera = getCamera();
+      const loc = canvasLocal(canvas, e.clientX, e.clientY);
       canvas.focus && canvas.focus();
 
-      // Middle mouse = pan
-      if (e.button === 1 || (e.button === 0 && state.spaceHeld)) {
-        state.mode = 'pan';
-        state.dragLast = sp;
+      // Pan via middle or right mouse
+      if (e.button === 1 || e.button === 2) {
+        mode = 'pan';
+        pan = { lastSx: loc.x, lastSy: loc.y };
+        activePointerId = e.pointerId;
+        try { canvas.setPointerCapture(e.pointerId); } catch {}
         e.preventDefault();
         return;
       }
-
       if (e.button !== 0) return;
 
-      // Pin hit? Start / complete a wire.
-      const pinHit = deps.Render.pickPin(ws.graph, wp, PIN_HIT_WORLD / ws.camera.zoom);
-      if (pinHit) {
-        if (!ws.pendingWire) {
-          // begin only from output pin
-          if (pinHit.dir === 'out') {
-            ws.pendingWire = { from: { node: pinHit.node, pin: pinHit.pin }, cursor: wp };
-            state.mode = 'wire';
-          } else {
-            // starting from input pin: we'll treat source as this input? skip.
-          }
-        } else {
-          // complete: must be input pin of a different node
-          if (pinHit.dir === 'in' && pinHit.node !== ws.pendingWire.from.node) {
-            deps.Model.addWire(ws.graph, {
-              from: ws.pendingWire.from,
-              to: { node: pinHit.node, pin: pinHit.pin },
-            });
-            if (ws.history) deps.History.commit(ws.history, ws.graph);
-          }
-          ws.pendingWire = null;
-          state.mode = 'idle';
-        }
+      activePointerId = e.pointerId;
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
+
+      // Port hit?
+      const portHit = hitPort(circuit, camera, loc.x, loc.y);
+      if (portHit && portHit.dir === 'out') {
+        mode = 'wire';
+        wire = { fromNode: portHit.node, fromPin: portHit.pin };
+        const wp = screenToWorld(camera, loc.x, loc.y, viewport(canvas));
+        onDragWire({ fromNode: wire.fromNode, fromPin: wire.fromPin, x: wp.x, y: wp.y });
         return;
       }
 
       // Node hit?
-      let hitNode = null;
-      // iterate in reverse add order (last wins for topmost)
-      const ids = Object.keys(ws.graph.nodes);
-      for (let i = ids.length - 1; i >= 0; i--) {
-        const n = ws.graph.nodes[ids[i]];
-        if (deps.Render.nodeContainsWorld(n, wp)) { hitNode = n; break; }
-      }
-
-      if (hitNode) {
-        // select + begin move
-        ws.selection = { nodes: { [hitNode.id]: true }, wires: {} };
-        state.mode = 'move';
-        state.dragNodeId = hitNode.id;
-        state.dragLast = sp;
-        return;
-      }
-
-      // empty click: clear selection + cancel pending wire + begin box-select
-      ws.selection = { nodes: {}, wires: {} };
-      ws.pendingWire = null;
-      state.mode = 'box';
-      state.boxStart = sp;
-      state.boxCur = sp;
-      ws.boxSelect = { x0: sp.x, y0: sp.y, x1: sp.x, y1: sp.y };
-    }
-
-    function onMouseMove(e) {
-      const ws = getWorkspace();
-      const sp = canvasPoint(canvas, e);
-      const wp = deps.Camera.screenToWorld(ws.camera, sp, viewport());
-
-      if (ws.pendingWire) {
-        ws.pendingWire.cursor = wp;
-      }
-
-      if (state.mode === 'pan' && state.dragLast) {
-        const dxs = sp.x - state.dragLast.x;
-        const dys = sp.y - state.dragLast.y;
-        ws.camera.x -= dxs / ws.camera.zoom;
-        ws.camera.y -= dys / ws.camera.zoom;
-        state.dragLast = sp;
-        return;
-      }
-      if (state.mode === 'move' && state.dragLast && state.dragNodeId) {
-        const dxs = sp.x - state.dragLast.x;
-        const dys = sp.y - state.dragLast.y;
-        const node = ws.graph.nodes[state.dragNodeId];
-        if (node) {
-          node.x += dxs / ws.camera.zoom;
-          node.y += dys / ws.camera.zoom;
-        }
-        state.dragLast = sp;
-        return;
-      }
-      if (state.mode === 'box' && state.boxStart) {
-        state.boxCur = sp;
-        ws.boxSelect = { x0: state.boxStart.x, y0: state.boxStart.y, x1: sp.x, y1: sp.y };
-        return;
-      }
-    }
-
-    function onMouseUp(e) {
-      const ws = getWorkspace();
-      if (state.mode === 'move') {
-        if (ws.history) deps.History.commit(ws.history, ws.graph);
-      }
-      if (state.mode === 'box' && ws.boxSelect) {
-        // finalize box select — convert screen rect to world and pick nodes
-        const x0 = Math.min(ws.boxSelect.x0, ws.boxSelect.x1);
-        const y0 = Math.min(ws.boxSelect.y0, ws.boxSelect.y1);
-        const x1 = Math.max(ws.boxSelect.x0, ws.boxSelect.x1);
-        const y1 = Math.max(ws.boxSelect.y0, ws.boxSelect.y1);
-        const w0 = deps.Camera.screenToWorld(ws.camera, { x: x0, y: y0 }, viewport());
-        const w1 = deps.Camera.screenToWorld(ws.camera, { x: x1, y: y1 }, viewport());
-        const sel = { nodes: {}, wires: {} };
-        for (const id of Object.keys(ws.graph.nodes)) {
-          const n = ws.graph.nodes[id];
-          if (n.x >= w0.x && n.x <= w1.x && n.y >= w0.y && n.y <= w1.y) {
-            sel.nodes[id] = true;
+      const nodeId = hitNode(circuit, camera, loc.x, loc.y);
+      if (nodeId) {
+        const additive = !!e.shiftKey;
+        press = { nodeId, sx: loc.x, sy: loc.y, moved: false, additive };
+        // Select immediately so subsequent drag moves the right set.
+        if (additive) {
+          if (selection.has(nodeId)) { /* keep */ }
+          else { selection.add(nodeId); emitSelect(); }
+        } else {
+          if (!selection.has(nodeId)) {
+            selection = new Set([nodeId]);
+            emitSelect();
           }
         }
-        ws.selection = sel;
-        ws.boxSelect = null;
+        mode = 'press';
+        return;
       }
-      state.mode = 'idle';
-      state.dragLast = null;
-      state.dragNodeId = null;
-      state.boxStart = null;
-      state.boxCur = null;
+
+      // Empty: clear selection
+      if (selection.size > 0) { selection = new Set(); emitSelect(); }
+      mode = 'idle';
+    }
+
+    function onPointerMove(e) {
+      const circuit = getCircuit();
+      const camera = getCamera();
+      const loc = canvasLocal(canvas, e.clientX, e.clientY);
+      const vp = viewport(canvas);
+
+      if (mode === 'palette' && palette) {
+        const wp = screenToWorld(camera, loc.x, loc.y, vp);
+        onDragGhost({ type: palette.type, x: wp.x, y: wp.y });
+        return;
+      }
+
+      if (mode === 'pan' && pan) {
+        const dxs = loc.x - pan.lastSx;
+        const dys = loc.y - pan.lastSy;
+        camera.x -= dxs / camera.zoom;
+        camera.y -= dys / camera.zoom;
+        pan.lastSx = loc.x; pan.lastSy = loc.y;
+        onPanZoom(camera);
+        return;
+      }
+
+      if (mode === 'wire' && wire) {
+        const wp = screenToWorld(camera, loc.x, loc.y, vp);
+        onDragWire({ fromNode: wire.fromNode, fromPin: wire.fromPin, x: wp.x, y: wp.y });
+        return;
+      }
+
+      if (mode === 'press' && press) {
+        const dx = loc.x - press.sx;
+        const dy = loc.y - press.sy;
+        if (Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+          // Begin move
+          mode = 'move';
+          const ids = selection.size > 0 ? Array.from(selection) : [press.nodeId];
+          move = { ids, lastSx: press.sx, lastSy: press.sy, moved: false };
+          press.moved = true;
+        } else {
+          return;
+        }
+      }
+
+      if (mode === 'move' && move) {
+        const dxs = loc.x - move.lastSx;
+        const dys = loc.y - move.lastSy;
+        const dwx = dxs / camera.zoom;
+        const dwy = dys / camera.zoom;
+        for (const id of move.ids) {
+          const n = findNode(circuit, id);
+          if (n) { n.x += dwx; n.y += dwy; }
+        }
+        move.lastSx = loc.x; move.lastSy = loc.y;
+        move.moved = true;
+        onChange(circuit);
+        return;
+      }
+    }
+
+    function onPointerUp(e) {
+      const circuit = getCircuit();
+      const camera = getCamera();
+      const loc = canvasLocal(canvas, e.clientX, e.clientY);
+      const stateMode = getMode();
+
+      try { canvas.releasePointerCapture(e.pointerId); } catch {}
+
+      if (mode === 'palette' && palette) {
+        const inside = loc.inside;
+        if (inside && stateMode === 'build') {
+          const wp = screenToWorld(camera, loc.x, loc.y, viewport(canvas));
+          const x = snap(wp.x), y = snap(wp.y);
+          const Model = window.NDP.Sand.Model;
+          Model.addNode(circuit, palette.type, x, y, defaultProps(palette.type));
+          onChange(circuit);
+        }
+        palette = null;
+        onDragGhost(null);
+        mode = 'idle';
+        activePointerId = null;
+        return;
+      }
+
+      if (mode === 'wire' && wire) {
+        const portHit = hitPort(circuit, camera, loc.x, loc.y);
+        if (portHit && portHit.dir === 'in' && portHit.node !== wire.fromNode) {
+          const Model = window.NDP.Sand.Model;
+          // Remove any existing wire into this input
+          const dead = circuit.wires.filter(w => w.to.node === portHit.node && w.to.pin === portHit.pin).map(w => w.id);
+          for (const id of dead) Model.removeWire(circuit, id);
+          Model.addWire(circuit,
+            { node: wire.fromNode, pin: wire.fromPin },
+            { node: portHit.node, pin: portHit.pin });
+          onChange(circuit);
+        }
+        wire = null;
+        onDragWire(null);
+        mode = 'idle';
+        activePointerId = null;
+        return;
+      }
+
+      if (mode === 'pan') {
+        pan = null;
+        mode = 'idle';
+        onPanZoom(camera);
+        activePointerId = null;
+        return;
+      }
+
+      if (mode === 'move' && move) {
+        for (const id of move.ids) {
+          const n = findNode(circuit, id);
+          if (n) { n.x = snap(n.x); n.y = snap(n.y); }
+        }
+        move = null;
+        mode = 'idle';
+        onChange(circuit);
+        activePointerId = null;
+        return;
+      }
+
+      if (mode === 'press' && press) {
+        // No drag happened. Input toggle?
+        const n = findNode(circuit, press.nodeId);
+        if (n && n.type === 'INPUT' && stateMode === 'build' && !press.moved) {
+          n.props = n.props || {};
+          n.props.value = n.props.value ? 0 : 1;
+          onInputToggle(n.id);
+          onChange(circuit);
+        }
+        press = null;
+        mode = 'idle';
+        activePointerId = null;
+        return;
+      }
+
+      mode = 'idle';
+      activePointerId = null;
+    }
+
+    function onPointerCancel(e) {
+      try { canvas.releasePointerCapture(e.pointerId); } catch {}
+      if (mode === 'palette') { palette = null; onDragGhost(null); }
+      if (mode === 'wire') { wire = null; onDragWire(null); }
+      pan = null; move = null; press = null;
+      mode = 'idle';
+      activePointerId = null;
     }
 
     function onWheel(e) {
-      const ws = getWorkspace();
-      const sp = canvasPoint(canvas, e);
-      const factor = e.deltaY < 0 ? 1.1 : (1 / 1.1);
-      deps.Camera.zoomBy(ws.camera, factor, sp, viewport());
+      const camera = getCamera();
+      const loc = canvasLocal(canvas, e.clientX, e.clientY);
+      const vp = viewport(canvas);
+      // Keep world point under cursor stable.
+      const wBefore = screenToWorld(camera, loc.x, loc.y, vp);
+      const factor = Math.exp(-e.deltaY * 0.001);
+      camera.zoom = clamp(camera.zoom * factor, 0.25, 2.5);
+      const wAfter = screenToWorld(camera, loc.x, loc.y, vp);
+      camera.x += wBefore.x - wAfter.x;
+      camera.y += wBefore.y - wAfter.y;
+      onPanZoom(camera);
       e.preventDefault();
     }
 
     function onKeyDown(e) {
-      const ws = getWorkspace();
-      if (e.key === ' ') { state.spaceHeld = true; }
-      if (e.key === 'Escape') { ws.pendingWire = null; state.mode = 'idle'; }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        let changed = false;
-        for (const id of Object.keys(ws.selection.nodes || {})) {
-          if (deps.Model.removeNode(ws.graph, id)) changed = true;
-        }
-        for (const id of Object.keys(ws.selection.wires || {})) {
-          if (deps.Model.removeWire(ws.graph, id)) changed = true;
-        }
-        ws.selection = { nodes: {}, wires: {} };
-        if (changed && ws.history) deps.History.commit(ws.history, ws.graph);
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        if (e.shiftKey) {
-          const g = deps.History.redo(ws.history);
-          if (g && setGraph) setGraph(g);
-        } else {
-          const g = deps.History.undo(ws.history);
-          if (g && setGraph) setGraph(g);
-        }
+        if (selection.size === 0) return;
+        const circuit = getCircuit();
+        const Model = window.NDP.Sand.Model;
+        for (const id of Array.from(selection)) Model.removeNode(circuit, id);
+        selection = new Set();
+        emitSelect();
+        onChange(circuit);
         e.preventDefault();
+      } else if (e.key === 'Escape') {
+        if (mode === 'wire') { wire = null; onDragWire(null); mode = 'idle'; }
+        if (mode === 'palette') { palette = null; onDragGhost(null); mode = 'idle'; }
       }
-    }
-
-    function onKeyUp(e) {
-      if (e.key === ' ') { state.spaceHeld = false; }
     }
 
     function onContextMenu(e) { e.preventDefault(); }
 
-    // Attach
-    canvas.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    canvas.addEventListener('contextmenu', onContextMenu);
-
-    function destroy() {
-      canvas.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      canvas.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      canvas.removeEventListener('contextmenu', onContextMenu);
+    // For palette drag initiated outside canvas, we listen on window so we can
+    // track the pointer even while it's over palette DOM, and release onto canvas.
+    function onWindowPointerMove(e) {
+      if (mode === 'palette') onPointerMove(e);
+    }
+    function onWindowPointerUp(e) {
+      if (mode === 'palette') onPointerUp(e);
     }
 
-    return { destroy, _state: state };
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerCancel);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('pointermove', onWindowPointerMove);
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('keydown', onKeyDown);
+
+    function destroy() {
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerCancel);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('keydown', onKeyDown);
+    }
+
+    return { destroy, startPaletteDrag };
   }
 
-  const Workspace = { create };
-  return { Workspace };
+  const InputWorkspace = { create };
+  return { InputWorkspace };
 });
