@@ -4,6 +4,88 @@ A running log of what shipped in each session.
 
 ## 2026-04-19
 
+### Hotel Cascadia — sampled SFX bank (Mixkit)
+
+Followed the procedural scare director with a thin layer of *real*
+horror audio so the big moments carry actual physical weight. Seven
+clips totalling ~5.4 MB pulled from Mixkit's free library (free
+commercial license, no attribution required — credited as a courtesy
+in `assets/switchboard/sfx/CREDITS.md`):
+
+| Local file | Use |
+| --- | --- |
+| `horror_ambience.mp3` | 6 s low-pass bed underneath every major scare |
+| `tomb_ambience.mp3` | reserve cold ambient bed |
+| `horror_sweep.mp3` | rises through the architect 3:14 window, fades out on close |
+| `horror_drum.mp3` | sub-impact under major + occasional moderate flicker |
+| `slow_heartbeat.mp3` | replaces procedural heartbeat once composure < 30 % |
+| `creepy_radio.mp3` | phantom whisper / wrong-number bleed for `card_glitch` and the new `phantom_radio_burst` event |
+| `creepy_creature.mp3` | sub-human snarl for the new `phantom_creature` event |
+
+**`voices.js` — sample bank**
+
+- `SAMPLE_BANK` constant lists all 7 clips and their paths.
+- `preloadSampleBank()` runs once on first `ensureCtx()` (the audio
+  context only exists after the first user gesture, so the fetch +
+  `decodeAudioData` happens lazily; the procedural fallbacks cover
+  the gap if the user hits a scare before the buffer decodes).
+- `playSample(name, opts)` builds a one-shot chain: source ->
+  optional biquad filter -> gain -> master. `opts` covers
+  `gain`, `rate`, `filter`, `filterFreq`, `filterQ`, `fadeInMs`,
+  `offsetSec`, `durationSec`. Returns a `{ stop(fadeMs) }` handle so
+  the bed can fade out gracefully.
+- `hasSample(name)` lets the scare director ask whether a buffer is
+  decoded yet and pick procedural vs sampled accordingly.
+
+**`scares.js` — wiring**
+
+- Major events now also fire `horror_drum` (gain 0.55) and start a
+  6 s `horror_ambience` bed (low-pass 1.8 kHz, 250 ms fade-in,
+  auto-stops via `bedUntil`) on top of the existing screech +
+  sub-thump + glass break. Far heavier physical impact.
+- Moderate `flicker` adds a sub-30 % gain `horror_drum` hit (gated
+  by `gateSample` so it can't fire more than once per 12 s).
+- Moderate `card_glitch` plays `creepy_radio` through a high-pass
+  600 Hz when available; falls back to procedural `sfxPhantomWhisper`
+  if not.
+- Two **new moderate event types**:
+  - `phantom_creature` — `creepy_creature.mp3` at 0.92x rate plays
+    from somewhere in the office, paired with a brief dust
+    silhouette at ear height. Throttled to 18 s gaps.
+  - `phantom_radio_burst` — `creepy_radio` through a Q=4 bandpass
+    at 1.5 kHz, with the brass header briefly overridden to a
+    glitch text. Reads as another switchboard bleeding into ours.
+- Architect 3:14 window now plays `horror_sweep` on the rising edge
+  (80 ms fade-in) and stops it with a 400 ms fade-out on the falling
+  edge (`d.architectWasOpen` rising-edge detector + `d.architectSweep`
+  handle). `gameCtx` from `game.js` was extended with
+  `architectWindowActive` so the director can see it.
+- Low-composure heartbeat: when composure < 30 %, the cadence
+  picker prefers `slow_heartbeat.mp3` (low-pass 220 Hz, 2.6 s
+  truncation, gain 0.30) and falls back to procedural
+  `sfxHeartbeat()` only when the buffer hasn't decoded.
+
+**Per-sample throttling**
+
+Added a `gateSample(d, name, minGapSec)` helper on the director so
+the same one-shot can't pile up when scares stack (e.g.
+`creepy_radio` is gated to 9 s minimum, `creepy_creature` to 18 s,
+`horror_drum` to 12 s). Procedural SFX are unaffected — they're
+already bounded by the choose() cooldown.
+
+**Bookkeeping**
+
+- New `scripts/probe-sfx.js` (one-off Mixkit scraper) and
+  `scripts/download-sfx.js` (curated downloader). Re-runnable; the
+  downloader is idempotent and writes `CREDITS.md` next to the
+  assets.
+- Bumped `voices.js?v=6`, `scares.js?v=2`, `game.js?v=6` in
+  `index.html` to bust caches.
+- Smoke tested: all 7 sample fetches return 200, all decode without
+  errors, no console errors during a Night 1 boot. Procedural
+  scares verified to still fire instantly (samples land a few
+  seconds later when decoded).
+
 ### Hotel Cascadia — jumpscare director + creepy SFX pass
 
 Added a dedicated scare system on top of the redesign so the hotel

@@ -75,8 +75,29 @@
       // Heartbeat cadence when composure is critical.
       heartbeatAcc: 0,
       // Time accumulator (used for cadence, deterministic)
-      time: 0
+      time: 0,
+      // Architect-window rising-edge detection — plays the sweep cue
+      // exactly once per opening. Reset on close.
+      architectWasOpen: false,
+      architectSweep: null,    // active handle so we can stop it on close
+      // Long ambient bed — fades in around moderate scares, plays
+      // horror_ambience or tomb_ambience for ~6s, then fades out.
+      bedHandle: null,
+      bedUntil: 0,
+      // Last-played sample name + timestamp (per-sample cooldown so
+      // we don't loop the same clip back-to-back).
+      lastSampleAt: {}
     };
+  }
+
+  /* Throttle individual samples so the same one-shot doesn't fire
+     twice within `minGapSec` of itself. Keeps phantom_radio etc. from
+     becoming a loop when scares stack. */
+  function gateSample(d, name, minGapSec) {
+    const last = d.lastSampleAt[name] || -Infinity;
+    if (now(d) - last < minGapSec) return false;
+    d.lastSampleAt[name] = now(d);
+    return true;
   }
 
   function now(d) { return d.time; }
@@ -109,26 +130,50 @@
       d.events.push({ type: 'screen_face', t: 0, max: 0.18 });
       d.flicker = 0.06; d.flickerMax = 0.06;
       try { V.sfxScreech(); V.sfxSubThump(0.95); V.sfxGlassBreak(); } catch (e) {}
-      // Major cooldown is long.
+      // Sampled layer — heavy drum + ambient bed underneath the
+      // procedural screech for body. Bed plays for ~6s with fade.
+      try {
+        if (V.hasSample('horror_drum')) V.playSample('horror_drum', { gain: 0.55 });
+      } catch (e) {}
+      try {
+        if (V.hasSample('horror_ambience') && !d.bedHandle) {
+          d.bedHandle = V.playSample('horror_ambience', {
+            gain: 0.22, fadeInMs: 250, durationSec: 6, filter: 'lowpass', filterFreq: 1800
+          });
+          d.bedUntil = now(d) + 6;
+        }
+      } catch (e) {}
       d.cooldown = 22 + Math.random() * 10;
       return;
     }
     if (severity === 'moderate') {
       const types = [
         'flicker', 'phantom_lamp', 'card_glitch', 'clock_jump',
-        'hand_at_edge', 'directory_glitch', 'header_glitch_loud'
+        'hand_at_edge', 'directory_glitch', 'header_glitch_loud',
+        'phantom_creature', 'phantom_radio_burst'
       ];
       const t = pick(types);
       if (t === 'flicker') {
         d.flicker = 0.08; d.flickerMax = 0.08;
         try { V.sfxSubThump(0.7); V.sfxClang(0.55); } catch (e) {}
+        try {
+          if (V.hasSample('horror_drum') && gateSample(d, 'horror_drum', 12)) {
+            V.playSample('horror_drum', { gain: 0.35 });
+          }
+        } catch (e) {}
       } else if (t === 'phantom_lamp') {
         spawnPhantomLamp(d, gameCtx);
         try { V.sfxPhantomRing(); } catch (e) {}
       } else if (t === 'card_glitch') {
         d.cardOverride = pick(CARD_GLITCH_TEXTS);
         d.cardOverrideUntil = now(d) + 0.45;
-        try { V.sfxPhantomWhisper(900); } catch (e) {}
+        try {
+          if (V.hasSample('creepy_radio') && gateSample(d, 'creepy_radio', 9)) {
+            V.playSample('creepy_radio', { gain: 0.32, filter: 'highpass', filterFreq: 600 });
+          } else {
+            V.sfxPhantomWhisper(900);
+          }
+        } catch (e) {}
       } else if (t === 'clock_jump') {
         d.events.push({ type: 'clock_jump', t: 0, max: 1.4 });
         try { V.sfxClang(0.4); } catch (e) {}
@@ -147,6 +192,32 @@
         d.headerOverride = pick(HEADER_GLITCH_TEXTS);
         d.headerOverrideUntil = now(d) + 0.9;
         try { V.sfxClang(0.35); } catch (e) {}
+      } else if (t === 'phantom_creature') {
+        // Creature snarl from inside the office — no visual, just audio.
+        // Pairs with a brief dust silhouette at ear-level for context.
+        try {
+          if (V.hasSample('creepy_creature') && gateSample(d, 'creepy_creature', 18)) {
+            V.playSample('creepy_creature', { gain: 0.42, rate: 0.92 });
+            d.events.push({ type: 'dust_silhouette', t: 0, max: 0.6,
+                            x: 280 + Math.random() * 400, y: 220 + Math.random() * 80 });
+          } else {
+            V.sfxPhantomWhisper(900);
+          }
+        } catch (e) {}
+      } else if (t === 'phantom_radio_burst') {
+        // Brief radio chatter as if another switchboard is bleeding into
+        // ours. Throttled by the per-sample gate.
+        try {
+          if (V.hasSample('creepy_radio') && gateSample(d, 'creepy_radio', 9)) {
+            V.playSample('creepy_radio', {
+              gain: 0.28, filter: 'bandpass', filterFreq: 1500, filterQ: 4
+            });
+            d.headerOverride = pick(HEADER_GLITCH_TEXTS);
+            d.headerOverrideUntil = now(d) + 0.5;
+          } else {
+            V.sfxPhantomWhisper(800);
+          }
+        } catch (e) {}
       }
       d.cooldown = 8 + Math.random() * 6;
       return;
@@ -182,6 +253,7 @@
   /* Tick the director. composurePct ∈ [0,1]. gameCtx is read-only —
      the director never mutates game state, only its own overlays. */
   function tick(d, dt, composurePct, night, gameCtx) {
+    const V = SB.Voices;
     d.time += dt;
     d.cooldown = Math.max(0, d.cooldown - dt);
     if (d.flicker > 0) d.flicker = Math.max(0, d.flicker - dt);
@@ -192,12 +264,42 @@
     if (d.headerOverride && now(d) > d.headerOverrideUntil) d.headerOverride = null;
     if (d.cardOverride && now(d) > d.cardOverrideUntil) d.cardOverride = null;
     if (d.dirOverride && now(d) > d.dirOverrideUntil) d.dirOverride = null;
+    // Ambient bed hard-stop once its window expires.
+    if (d.bedHandle && now(d) > d.bedUntil) {
+      try { d.bedHandle.stop(800); } catch (e) {}
+      d.bedHandle = null;
+    }
+    // Architect window rising / falling edge — play the sampled
+    // dread sweep on open, kill it on close.
+    const open = !!gameCtx.architectWindowActive;
+    if (open && !d.architectWasOpen) {
+      try {
+        if (V.hasSample('horror_sweep')) {
+          d.architectSweep = V.playSample('horror_sweep', { gain: 0.38, fadeInMs: 80 });
+        }
+      } catch (e) {}
+    } else if (!open && d.architectWasOpen) {
+      if (d.architectSweep) {
+        try { d.architectSweep.stop(400); } catch (e) {}
+        d.architectSweep = null;
+      }
+    }
+    d.architectWasOpen = open;
     // Heartbeat ambience when composure is below 30% — every ~5s.
+    // Prefer the sampled slow_heartbeat when it's loaded.
     if (composurePct < 0.30) {
       d.heartbeatAcc += dt;
       if (d.heartbeatAcc > 4.5 + Math.random() * 1.5) {
         d.heartbeatAcc = 0;
-        try { SB.Voices.sfxHeartbeat(); } catch (e) {}
+        try {
+          if (V.hasSample('slow_heartbeat')) {
+            V.playSample('slow_heartbeat', {
+              gain: 0.30, filter: 'lowpass', filterFreq: 220, durationSec: 2.6
+            });
+          } else {
+            V.sfxHeartbeat();
+          }
+        } catch (e) {}
       }
     } else {
       d.heartbeatAcc = 0;

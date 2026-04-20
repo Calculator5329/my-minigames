@@ -91,9 +91,100 @@
       convolver = ctx.createConvolver();
       convolver.buffer = makeImpulseResponse(ctx, 1.4, 2.6);
       inited = true;
+      preloadSampleBank();
       return ctx;
     } catch (e) { return null; }
   }
+
+  /* ---------------------------------------------------------------- *
+   * Sampled SFX bank (Mixkit, free-use). Each entry is decoded into
+   * an AudioBuffer once and cached. playSample() is a no-op until the
+   * buffer is decoded — the procedural fallbacks in scares.js cover
+   * the gap. See assets/switchboard/sfx/CREDITS.md.
+   * ---------------------------------------------------------------- */
+  const SAMPLE_BANK = {
+    horror_ambience: 'assets/switchboard/sfx/horror_ambience.mp3',
+    tomb_ambience:   'assets/switchboard/sfx/tomb_ambience.mp3',
+    horror_sweep:    'assets/switchboard/sfx/horror_sweep.mp3',
+    horror_drum:     'assets/switchboard/sfx/horror_drum.mp3',
+    slow_heartbeat:  'assets/switchboard/sfx/slow_heartbeat.mp3',
+    creepy_radio:    'assets/switchboard/sfx/creepy_radio.mp3',
+    creepy_creature: 'assets/switchboard/sfx/creepy_creature.mp3'
+  };
+  const samples = new Map();          // name -> AudioBuffer
+  let bankPreloaded = false;
+  function preloadSampleBank() {
+    if (bankPreloaded || !ctx) return;
+    bankPreloaded = true;
+    for (const name of Object.keys(SAMPLE_BANK)) {
+      const url = SAMPLE_BANK[name];
+      fetch(url, { cache: 'force-cache' })
+        .then(r => r.ok ? r.arrayBuffer() : null)
+        .then(ab => ab && ctx.decodeAudioData(ab))
+        .then(buf => { if (buf) samples.set(name, buf); })
+        .catch(() => { /* swallow — procedural fallbacks cover it */ });
+    }
+  }
+
+  /* Play a one-shot sample. opts: { gain (0..1), rate (0.5..2),
+     filter ('lowpass'|'highpass'|'bandpass'), filterFreq, filterQ,
+     fadeInMs, fadeOutMs, offsetSec (skip into the sample),
+     durationSec (truncate). Returns a handle with .stop(). */
+  function playSample(name, opts) {
+    const c = ensureCtx(); if (!c || isMuted()) return { stop(){} };
+    const buf = samples.get(name);
+    if (!buf) return { stop(){} };
+    opts = opts || {};
+    const gainVal = opts.gain != null ? opts.gain : 0.5;
+    const t0 = c.currentTime;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = opts.rate || 1.0;
+    let node = src;
+    if (opts.filter) {
+      const f = c.createBiquadFilter();
+      f.type = opts.filter;
+      if (opts.filterFreq != null) f.frequency.value = opts.filterFreq;
+      if (opts.filterQ != null) f.Q.value = opts.filterQ;
+      node.connect(f); node = f;
+    }
+    const g = c.createGain();
+    g.gain.value = opts.fadeInMs ? 0.0001 : gainVal;
+    if (opts.fadeInMs) {
+      g.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), t0 + opts.fadeInMs / 1000);
+    }
+    node.connect(g); g.connect(masterGain);
+    const offset = opts.offsetSec || 0;
+    const dur = opts.durationSec || (buf.duration - offset);
+    src.start(t0, offset, dur);
+    let stopped = false;
+    const cleanup = () => {
+      if (stopped) return; stopped = true;
+      try { src.disconnect(); g.disconnect(); if (node !== src) node.disconnect(); } catch (e) {}
+    };
+    src.onended = cleanup;
+    return {
+      stop(fadeMs) {
+        if (stopped) return;
+        const f = (fadeMs || 0) / 1000;
+        const tt = c.currentTime;
+        try {
+          if (f > 0) {
+            g.gain.cancelScheduledValues(tt);
+            g.gain.setValueAtTime(g.gain.value, tt);
+            g.gain.exponentialRampToValueAtTime(0.0001, tt + f);
+            setTimeout(() => { try { src.stop(); } catch (e) {} cleanup(); }, fadeMs + 30);
+          } else {
+            try { src.stop(); } catch (e) {}
+            cleanup();
+          }
+        } catch (e) { cleanup(); }
+      }
+    };
+  }
+
+  /* True if the named sample is decoded and ready to play. */
+  function hasSample(name) { return samples.has(name); }
 
   /* Build a synthetic, slightly metallic room impulse — dense exponential
      decay with a touch of tape modulation. Two seconds total. */
@@ -727,6 +818,7 @@
     prefetchTranscript, getTranscript,
     inhale, bleed,
     sfxSubThump, sfxClang, sfxGlassBreak, sfxPhantomWhisper,
-    sfxPhantomRing, sfxHeartbeat, sfxScreech
+    sfxPhantomRing, sfxHeartbeat, sfxScreech,
+    playSample, hasSample
   };
 })();

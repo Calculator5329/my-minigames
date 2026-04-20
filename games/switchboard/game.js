@@ -192,7 +192,8 @@
         const compPct = st.composure / st.composureMax;
         SB.Scares.tick(this.scares, dt, compPct, this.currentNight, {
           board: this.board,
-          directory: st.directory
+          directory: st.directory,
+          architectWindowActive: !!st.architectWindowActive
         });
       }
 

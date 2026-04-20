@@ -20,6 +20,7 @@ don't break; the selector card title is "Hotel Cascadia."
 | Visuals v1 (V1+V2+V3+V5+V6+V7) | done | Living lamps, cable physics, dust + vignette, paper-slip caller card, brass clock + corridor sliver, breathing camera. |
 | Cable / state-leak bug across takeover restart | fixed | per-cable park timer instead of wall-clock setTimeout. |
 | Jumpscare director + 7 procedural SFX (`scares.js`) | done | minor / moderate / major events. Phantom whispers, lamps, hands, header glitches, full-screen face flash. |
+| Sampled SFX bank (Mixkit, 7 clips) | done | `voices.js` `playSample`/`hasSample`; scares director layers samples on top of procedurals when decoded; new `phantom_creature` + `phantom_radio_burst` events; architect 3:14 sweep cue with rising/falling-edge handle. |
 | Polish + playtest | active | |
 
 ## Run this once when you're back
