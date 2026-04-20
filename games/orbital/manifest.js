@@ -17,6 +17,8 @@ NDP.registerManifest({
       { key: 'orb_elite',         src: sp.elite,         type: 'image' },
       { key: 'orb_boss',          src: sp.boss,          type: 'image' },
       { key: 'orb_turret_dart',   src: sp.turret_dart,   type: 'image' },
+      { key: 'orb_turret_dart_a', src: sp.turret_dart_a, type: 'image' },
+      { key: 'orb_turret_dart_b', src: sp.turret_dart_b, type: 'image' },
       { key: 'orb_turret_cannon', src: sp.turret_cannon, type: 'image' },
       { key: 'orb_turret_beam',   src: sp.turret_beam,   type: 'image' },
       { key: 'orb_turret_gravity',src: sp.turret_gravity,type: 'image' },

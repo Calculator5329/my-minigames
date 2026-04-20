@@ -880,6 +880,15 @@
     <line x1="50" y1="48" x2="54" y2="56" stroke="#5a2008" stroke-width="2" stroke-linecap="round"/>
   </svg>`;
 
+  S.turret_dart_a = S.turret_dart
+    .replace(/#7ae0ff/g, '#ff9055')
+    .replace(/#4fc8ff/g, '#ff9055')
+    .replace(/#d8faff/g, '#ffd8b8');
+  S.turret_dart_b = S.turret_dart
+    .replace(/#7ae0ff/g, '#c8a8ff')
+    .replace(/#4fc8ff/g, '#a070ff')
+    .replace(/#d8faff/g, '#e8d8ff');
+
   // ==================================================================
   //  Registry
   // ==================================================================

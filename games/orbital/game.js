@@ -1729,7 +1729,19 @@
       const breatheSz = idle
         ? sz * (1 + 0.025 * Math.sin(this.time * 2 + t.x * 0.01))
         : sz;
-      Assets.draw(ctx, def.sprite, t.x + dx, t.y + dy, breatheSz, breatheSz, {
+      const KNOWN_VARIANTS = new Set(['orb_turret_dart_a', 'orb_turret_dart_b']);
+      let effSprite = def.sprite;
+      if (!t.paragon && t.pathTiers) {
+        const pa = t.pathTiers.A | 0, pb = t.pathTiers.B | 0;
+        let variant = null;
+        if (pa >= 3 && pa >= pb) variant = 'a';
+        else if (pb >= 3) variant = 'b';
+        if (variant) {
+          const candidate = def.sprite + '_' + variant;
+          if (KNOWN_VARIANTS.has(candidate)) effSprite = candidate;
+        }
+      }
+      Assets.draw(ctx, effSprite, t.x + dx, t.y + dy, breatheSz, breatheSz, {
         rot,
         fallback: () => {
           ctx.fillStyle = def.color || '#888';
