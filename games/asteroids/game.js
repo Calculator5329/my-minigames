@@ -28,7 +28,7 @@
   // the script has long since loaded.
   if (Sprites && !Sprites.has('aster.ship_basic')) {
     const s = document.createElement('script');
-    s.src = 'games/asteroids/sprites.js?v=2';
+    s.src = 'games/asteroids/sprites.js?v=4';
     document.head.appendChild(s);
   }
 
@@ -48,13 +48,68 @@
     { id:'rapidfire', name:'RAPID FIRE', desc:'Fire rate doubled',                cost: 25, sprite:'aster.upgrade_rapidfire' },
     { id:'twin',      name:'TWIN GUNS',  desc:'Two parallel bullets per shot',    cost: 35, sprite:'aster.upgrade_twin' },
     { id:'shield',    name:'SHIELD',     desc:'Absorb one hit, regenerates 8s',   cost: 30, sprite:'aster.upgrade_shield' },
-    { id:'missile',   name:'MISSILE',    desc:'Homing missile · X · 6s cooldown', cost: 40, sprite:'aster.upgrade_missile' }
+    { id:'missile',   name:'MISSILE',    desc:'Homing missile · X · 6s cooldown', cost: 40, sprite:'aster.upgrade_missile' },
+    { id:'overclock', name:'OVERCLOCK',  desc:'+35% bullet speed & range',        cost: 30, sprite:'aster.upgrade_overclock' },
+    { id:'salvage',   name:'SALVAGE',    desc:'+1 coin per rock destroyed',       cost: 35, sprite:'aster.upgrade_salvage' },
+    { id:'drone',     name:'DRONE',      desc:'Orbit drone auto-fires (slow)',    cost: 50, sprite:'aster.upgrade_drone' },
+    { id:'emp',       name:'EMP BLAST',  desc:'C clears bullets & mini-nukes 1/run', cost: 40, sprite:'aster.upgrade_emp' }
   ];
+
+  // ---------------------------------------------------------------------------
+  // BIOMES — applied to each sector; palette swaps backdrop + star tint
+  const BIOMES = {
+    frontier: { name:'FRONTIER',     bg1:'#0a1228', bg2:'#000',      star:'#cfe', accent:'#7cd9ff', accent2:'#6cf' },
+    debris:   { name:'DEBRIS BELT',  bg1:'#1a0e06', bg2:'#060302',   star:'#ffc', accent:'#fb6',    accent2:'#c84' },
+    ion:      { name:'ION STORM',    bg1:'#061a18', bg2:'#010808',   star:'#cfe', accent:'#3fe',    accent2:'#6fc' },
+    voidBiome:{ name:'DEEP VOID',    bg1:'#0a0418', bg2:'#020004',   star:'#ccf', accent:'#a6f',    accent2:'#46c' },
+    core:     { name:'THE CORE',     bg1:'#2a0808', bg2:'#0a0000',   star:'#fec', accent:'#f84',    accent2:'#fd3' }
+  };
+
+  // Wave → sector map. 5 sectors total; last ends with Hive Queen.
+  // Sector 1: waves 1-2, S2: 3-4, S3: wave 5 (Swarm Lord), S4: 6-7, S5: 8-10.
+  function sectorForWave(w) {
+    if (w <= 2) return 1;
+    if (w <= 4) return 2;
+    if (w === 5) return 3;
+    if (w <= 7) return 4;
+    return 5;
+  }
+  // "End" wave per sector — the last wave of the sector; after clearing it, we
+  // open the map choice for the next sector (unless we're in sector 5).
+  function isSectorEnd(w) {
+    return w === 2 || w === 4 || w === 5 || w === 7;
+  }
+
+  const MODIFIERS = {
+    none:     { name:'NORMAL',   desc:'',                           tag:'' },
+    dense:    { name:'DENSE',    desc:'+1 extra rock, +40% coins',  tag:'DENSE' },
+    bounty:   { name:'BOUNTY',   desc:'2x bay credits this sector', tag:'BOUNTY' },
+    elite:    { name:'ELITE',    desc:'+20% rock speed, +50% coins',tag:'ELITE' },
+    turbulent:{ name:'TURBULENT', desc:'Rocks drift faster',         tag:'TURBO' }
+  };
+
+  function rollSectorBiomes() {
+    const middle = ['debris', 'ion', 'voidBiome'];
+    for (let i = middle.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [middle[i], middle[j]] = [middle[j], middle[i]];
+    }
+    return {
+      1: 'frontier',
+      2: middle[0],
+      3: middle[1],
+      4: middle[2],
+      5: 'core'
+    };
+  }
 
   function loadSave() {
     const def = {
       bestWave: 0,
-      perksUnlocked: { rapidfire:false, twin:false, shield:false, missile:false },
+      perksUnlocked: {
+        rapidfire:false, twin:false, shield:false, missile:false,
+        overclock:false, salvage:false, drone:false, emp:false
+      },
       defeatedHive: false
     };
     const saved = Storage.getGameData('asteroids') || {};
@@ -77,10 +132,22 @@
       this.wavesClearedThisRun = 0;
       this.victoryAchieved = false;
 
-      this.upgrades = { rapidfire:false, twin:false, shield:false, missile:false };
+      this.upgrades = {
+        rapidfire:false, twin:false, shield:false, missile:false,
+        overclock:false, salvage:false, drone:false, emp:false
+      };
       this.shieldHp = 0;
       this.shieldRegenTimer = 0;
       this.missileCD = 0;
+      this.empUsed = false;
+      this.playerDrone = null;       // { ang, r, shotCD } when upgrade owned
+      this.sectorBiomes = rollSectorBiomes();
+      this.sector = 1;
+      this.biome = BIOMES[this.sectorBiomes[1]];
+      this.modifier = 'none';
+      this.sectorIntroT = 0;
+      this.mapRects = [];
+      this.mapCards = null;
 
       this.shootCD = 0;
       this.bullets = [];
@@ -139,7 +206,9 @@
       Sprites.preload(['aster.missile'], 36, 12);
       Sprites.preload(['aster.alien_bullet'], 18, 18);
       Sprites.preload(['aster.upgrade_rapidfire','aster.upgrade_twin',
-                       'aster.upgrade_shield','aster.upgrade_missile'], 64, 64);
+                       'aster.upgrade_shield','aster.upgrade_missile',
+                       'aster.upgrade_overclock','aster.upgrade_salvage',
+                       'aster.upgrade_drone','aster.upgrade_emp'], 64, 64);
 
       this._refreshHud();
     }
@@ -168,25 +237,100 @@
       } else {
         mid = `<span>Rocks <b>${this.rocks.length}</b></span>`;
       }
+      const biomeTag = this.biome ? ` <span style="color:${this.biome.accent}">[${this.biome.name}]</span>` : '';
+      const modTag = (this.modifier && this.modifier !== 'none') ? ` <span style="color:#fc6">[${MODIFIERS[this.modifier].tag}]</span>` : '';
       this.setHud(
-        `<span>Wave <b>${this.waveN}/${TOTAL_WAVES}</b></span>` +
+        `<span>S<b>${this._currentSector ? this._currentSector() : 1}</b>·W<b>${this.waveN}/${TOTAL_WAVES}</b></span>` +
         mid +
         `<span>Score <b>${this.score}</b></span>` +
-        `<span>Bay ● <b>${Storage.getGameWallet('asteroids')}</b></span>`
+        `<span>Bay ● <b>${Storage.getGameWallet('asteroids')}</b></span>` +
+        biomeTag + modTag
       );
     }
 
     // ======================================================================
     // UPDATE — phase dispatch
     update(dt) {
+      if (this._hitStop > 0) {
+        this._hitStop = Math.max(0, this._hitStop - dt);
+        dt = dt * 0.15;
+      }
       for (const s of this.stars) s.tw += s.tws * dt;
-      if (this.phase === 'intro')   return this._updateIntro(dt);
-      if (this.phase === 'wave')    return this._updateWave(dt);
-      if (this.phase === 'boss')    return this._updateBoss(dt);
-      if (this.phase === 'between') return this._updateBetween(dt);
-      if (this.phase === 'bossWin') return this._updateBossWin(dt);
-      if (this.phase === 'shop')    return this._updateShop(dt);
-      if (this.phase === 'victory') return this._updateVictory(dt);
+      if (this.phase === 'intro')      return this._updateIntro(dt);
+      if (this.phase === 'wave')       return this._updateWave(dt);
+      if (this.phase === 'boss')       return this._updateBoss(dt);
+      if (this.phase === 'between')    return this._updateBetween(dt);
+      if (this.phase === 'bossWin')    return this._updateBossWin(dt);
+      if (this.phase === 'shop')       return this._updateShop(dt);
+      if (this.phase === 'mapChoice')  return this._updateMapChoice(dt);
+      if (this.phase === 'sectorIntro')return this._updateSectorIntro(dt);
+      if (this.phase === 'victory')    return this._updateVictory(dt);
+    }
+
+    _currentSector() { return sectorForWave(this.waveN); }
+
+    // After clearing a sector-end wave (or boss), route to map choice unless
+    // we're entering sector 5 (final, no branching) or already in sector 5.
+    _maybeOpenMapChoice() {
+      const nextWave = this.waveN + 1;
+      if (nextWave > TOTAL_WAVES) return false;
+      const curSec = sectorForWave(this.waveN);
+      const nextSec = sectorForWave(nextWave);
+      if (nextSec === curSec) return false;
+      if (nextSec === 5) {
+        // Final sector — no branching. Just switch biome and show an intro.
+        this._enterSector(5, 'none');
+        return true;
+      }
+      this._openMapChoice(nextSec);
+      return true;
+    }
+
+    _openMapChoice(nextSec) {
+      this.phase = 'mapChoice';
+      const biomeId = this.sectorBiomes[nextSec];
+      const biome = BIOMES[biomeId];
+      const pool = ['dense', 'bounty', 'elite', 'turbulent'];
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      const mods = ['none', pool[0], pool[1]];
+      for (let i = mods.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [mods[i], mods[j]] = [mods[j], mods[i]];
+      }
+      this.mapCards = mods.map(m => ({ biome, biomeId, modifier: m, nextSec }));
+      this.mapRects = [];
+    }
+
+    _updateMapChoice() {
+      this._refreshHud();
+      if (!Input.mouse.justPressed) return;
+      Input.mouse.justPressed = false;
+      const mx = Input.mouse.x, my = Input.mouse.y;
+      for (const r of this.mapRects) {
+        if (mx < r.x || mx > r.x + r.w || my < r.y || my > r.y + r.h) continue;
+        const c = this.mapCards[r.i];
+        this._enterSector(c.nextSec, c.modifier);
+        return;
+      }
+    }
+
+    _enterSector(sec, modifier) {
+      this.sector = sec;
+      this.biome = BIOMES[this.sectorBiomes[sec]];
+      this.modifier = modifier;
+      this.mapCards = null;
+      this.phase = 'sectorIntro';
+      this.sectorIntroT = 1.8;
+    }
+
+    _updateSectorIntro(dt) {
+      this.sectorIntroT -= dt;
+      // Let stars animate
+      for (const s of this.stars) s.tw += s.tws * dt;
+      if (this.sectorIntroT <= 0) this._startWave(this.waveN + 1);
     }
 
     // ----- intro splash -----
@@ -221,8 +365,21 @@
 
       this.phase = 'wave';
       this.bossAnnounceT = 0;
-      const count = n + 2;
-      const speedMul = Math.pow(1.05, n);
+      // Ensure sector/biome match the new wave (covers the first-wave intro path)
+      const sec = sectorForWave(n);
+      if (sec !== this.sector) {
+        this.sector = sec;
+        this.biome = BIOMES[this.sectorBiomes[sec]];
+      }
+      let count = n + 2;
+      let speedMul = Math.pow(1.05, n);
+      if (this.modifier === 'dense') count += 1;
+      if (this.modifier === 'elite') speedMul *= 1.2;
+      if (this.modifier === 'turbulent') speedMul *= 1.35;
+      // Reset per-sector drone if owned
+      if (this.upgrades.drone) {
+        this.playerDrone = this.playerDrone || { ang: 0, r: 46, shotCD: 1.0 };
+      }
       for (let i = 0; i < count; i++) {
         let x, y, tries = 0;
         do { x = Math.random() * W; y = Math.random() * H; tries++; }
@@ -311,11 +468,60 @@
       if (this.upgrades.missile && (Input.keys['x'] || Input.keys['X']) && this.missileCD <= 0) {
         this._fireMissile();
       }
+      if (this.upgrades.emp && !this.empUsed && (Input.keys['c'] || Input.keys['C'])) {
+        this._fireEmp();
+        Input.keys['c'] = false; Input.keys['C'] = false;
+      }
+      this._updatePlayerDrone(dt);
+    }
+
+    _fireEmp() {
+      this.empUsed = true;
+      this.flash('#7ae0ff', 0.5);
+      this.shake(22, 0.6);
+      this.sfx.play('explode');
+      this.particles.burst(this.ship.x, this.ship.y, 80, { color:'#7ae0ff', speed: 420, life: 0.9, size: 3 });
+      this.alienBullets = [];
+      // 2 dmg to all rocks/drones/boss
+      for (let i = this.rocks.length - 1; i >= 0; i--) {
+        const r = this.rocks[i];
+        if (Math.hypot(this.ship.x - r.x, this.ship.y - r.y) < 280) this._destroyRock(i);
+      }
+      for (let i = this.drones.length - 1; i >= 0; i--) this._killDrone(i);
+      if (this.boss) {
+        const list = this.boss.split && this.boss.minis ? this.boss.minis : [this.boss];
+        for (const e of list) this._hitBoss(e, 3, e.x, e.y);
+      }
+    }
+
+    _updatePlayerDrone(dt) {
+      const d = this.playerDrone;
+      if (!d || !this.upgrades.drone) return;
+      d.ang += 2.4 * dt;
+      d.shotCD -= dt;
+      const dx = this.ship.x + Math.cos(d.ang) * d.r;
+      const dy = this.ship.y + Math.sin(d.ang) * d.r;
+      d.x = dx; d.y = dy;
+      if (d.shotCD <= 0) {
+        const t = this._nearestEnemy(dx, dy);
+        if (t) {
+          const ang = Math.atan2(t.y - dy, t.x - dx);
+          this.bullets.push({
+            x: dx, y: dy,
+            vx: Math.cos(ang) * 520, vy: Math.sin(ang) * 520,
+            life: 0.7
+          });
+          d.shotCD = 0.75;
+          this.particles.emit({ x: dx, y: dy, vx: 0, vy: 0, life: 0.15, size: 3, color: '#7ae0ff' });
+        } else {
+          d.shotCD = 0.3;
+        }
+      }
     }
 
     _fire() {
       const ship = this.ship;
-      const sp = 600;
+      const sp = this.upgrades.overclock ? 810 : 600;
       const baseCD = 0.18;
       this.shootCD = this.upgrades.rapidfire ? baseCD * 0.5 : baseCD;
       const offsets = this.upgrades.twin ? [-7, 7] : [0];
@@ -327,7 +533,7 @@
           y: ship.y + Math.sin(ship.ang) * 14 + oy,
           vx: Math.cos(ship.ang) * sp + ship.vx,
           vy: Math.sin(ship.ang) * sp + ship.vy,
-          life: 0.9
+          life: this.upgrades.overclock ? 1.2 : 0.9
         });
       }
       this.sfx.play('shoot');
@@ -399,6 +605,9 @@
     _destroyRock(idx) {
       const r = this.rocks[idx];
       this.addScore(r.def.value);
+      if (this.upgrades.salvage) {
+        Storage.addGameWallet('asteroids', 1);
+      }
       this.shake(r.sizeKey === 'large' ? 8 : r.sizeKey === 'medium' ? 5 : 3, 0.2);
       const palette = r.sizeKey === 'large' ? '#7cd9ff'
                     : r.sizeKey === 'medium' ? '#cfe9ff' : '#ffd86b';
@@ -733,6 +942,33 @@
               b.minis.splice(i, 1);
               continue;
             }
+            // Phase 3 enrage — when either mini drops below 30% HP, its weak
+            // point spins 2x and it fires an aimed-3-shot burst periodically.
+            if (!q.enraged && q.hp <= q.maxHp * 0.3) {
+              q.enraged = true;
+              q.weakRot *= 2.2;
+              q.shotCD = 0.6;
+              this.flash('#ff3a3a', 0.4);
+              this.shake(14, 0.5);
+              this.sfx.play('boss');
+            }
+            if (q.enraged) {
+              // Override default shot cadence with burst
+              q.burstCD = (q.burstCD || 0) - dt;
+              if (q.burstCD <= 0) {
+                q.burstCD = 2.4;
+                const baseAng = Math.atan2(this.ship.y - q.y, this.ship.x - q.x);
+                for (let k = -1; k <= 1; k++) {
+                  this.alienBullets.push({
+                    x: q.x, y: q.y,
+                    vx: Math.cos(baseAng + k * 0.25) * 300,
+                    vy: Math.sin(baseAng + k * 0.25) * 300,
+                    life: 3
+                  });
+                }
+                this.sfx.play('ping');
+              }
+            }
             tickQueen(q);
             if (this.state !== 'playing') return;
           }
@@ -778,9 +1014,11 @@
       this.wavesClearedThisRun++;
       if (this.boss.kind === 'hive') this.victoryAchieved = true;
 
-      this.flash('#ffd86b', 0.4);
-      this.shake(24, 0.6);
-      this.particles.burst(CX, CY, 80, { color:'#ffd86b', speed: 360, life: 1.0 });
+      this.flash('#ffd86b', this.boss.kind === 'hive' ? 0.7 : 0.4);
+      this.shake(this.boss.kind === 'hive' ? 32 : 24, this.boss.kind === 'hive' ? 0.9 : 0.6);
+      this._hitStop = this.boss.kind === 'hive' ? 0.35 : 0.15;
+      this.particles.burst(CX, CY, this.boss.kind === 'hive' ? 140 : 80,
+                           { color:'#ffd86b', speed: 360, life: 1.0 });
       this.sfx.play('win');
 
       this.boss = null;
@@ -816,7 +1054,11 @@
       this._updateRocks(dt);         if (this.state !== 'playing') return;
 
       if (this.rocks.length === 0) {
-        const reward = 5 + 2 * this.waveN;
+        let rewardMul = 1.0;
+        if (this.modifier === 'dense')  rewardMul = 1.4;
+        if (this.modifier === 'elite')  rewardMul = 1.5;
+        if (this.modifier === 'bounty') rewardMul = 2.0;
+        const reward = Math.round((5 + 2 * this.waveN) * rewardMul);
         Storage.addGameWallet('asteroids', reward);
         this.lastReward = reward;
         this.addScore(50 + 50 * this.waveN);
@@ -844,7 +1086,12 @@
 
     _updateBetween(dt) {
       this.betweenTimer -= dt;
-      if (this.betweenTimer <= 0) this.phase = 'shop';
+      if (this.betweenTimer <= 0) {
+        // If this wave ended a sector, open map choice (which flows into
+        // sectorIntro → startWave). Otherwise drop into the upgrade shop.
+        if (isSectorEnd(this.waveN) && this._maybeOpenMapChoice()) return;
+        this.phase = 'shop';
+      }
       this._refreshHud();
     }
 
@@ -855,6 +1102,8 @@
           this.phase = 'victory';
           this.victoryTimer = 0;
         } else {
+          // Boss at wave 5 = end of sector 3 → map choice.
+          if (isSectorEnd(this.waveN) && this._maybeOpenMapChoice()) return;
           this.phase = 'shop';
         }
       }
@@ -904,9 +1153,11 @@
     render(ctx) {
       this._drawBackdrop(ctx);
       this._drawStars(ctx);
-      if (this.phase === 'intro')   return this._renderIntro(ctx);
-      if (this.phase === 'shop')    return this._renderShop(ctx);
-      if (this.phase === 'victory') return this._renderVictory(ctx);
+      if (this.phase === 'intro')       return this._renderIntro(ctx);
+      if (this.phase === 'shop')        return this._renderShop(ctx);
+      if (this.phase === 'victory')     return this._renderVictory(ctx);
+      if (this.phase === 'mapChoice')   return this._renderMapChoice(ctx);
+      if (this.phase === 'sectorIntro') return this._renderSectorIntro(ctx);
 
       this._drawWorld(ctx);
       if (this.phase === 'between') this._renderBetweenOverlay(ctx);
@@ -915,16 +1166,104 @@
     }
 
     _drawBackdrop(ctx) {
+      const biome = this.biome || BIOMES.frontier;
       const g = ctx.createRadialGradient(CX, CY, 100, CX, CY, 720);
-      g.addColorStop(0, '#0a1228'); g.addColorStop(1, '#000');
+      g.addColorStop(0, biome.bg1); g.addColorStop(1, biome.bg2);
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     }
 
     _drawStars(ctx) {
+      const biome = this.biome || BIOMES.frontier;
+      const sc = biome.star;
+      // Parse rgb-ish once: use hex → simple channel tint
       for (const s of this.stars) {
         const a = 0.3 + 0.6 * Math.abs(Math.sin(s.tw));
-        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fillStyle = `rgba(${hex2rgb(sc)}, ${a})`;
         ctx.fillRect(s.x, s.y, 1, 1);
+      }
+    }
+
+    _renderMapChoice(ctx) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd86b';
+      ctx.font = 'bold 34px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.shadowColor = '#ffd86b'; ctx.shadowBlur = 16;
+      ctx.fillText('CHOOSE YOUR PATH', CX, 60);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#cfe9ff'; ctx.font = '14px ui-monospace, monospace';
+      ctx.fillText('Sector ' + (this.mapCards[0].nextSec) + ' of 5', CX, 106);
+
+      this.mapRects = [];
+      const cards = this.mapCards;
+      const cw = 220, ch = 310, gap = 30;
+      const totalW = cards.length * cw + (cards.length - 1) * gap;
+      const startX = CX - totalW / 2;
+      const y = 150;
+      for (let i = 0; i < cards.length; i++) {
+        const c = cards[i];
+        const rx = startX + i * (cw + gap);
+        ctx.fillStyle = '#0a0818';
+        ctx.fillRect(rx, y, cw, ch);
+        ctx.strokeStyle = c.biome.accent;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rx + 1, y + 1, cw - 2, ch - 2);
+        // Biome preview window
+        const prevH = 110;
+        const pg = ctx.createLinearGradient(rx + 10, y + 40, rx + 10, y + 40 + prevH);
+        pg.addColorStop(0, c.biome.bg1); pg.addColorStop(1, c.biome.bg2);
+        ctx.fillStyle = pg;
+        ctx.fillRect(rx + 10, y + 40, cw - 20, prevH);
+        // Stars
+        for (let j = 0; j < 30; j++) {
+          const sx = rx + 10 + ((j * 41) % (cw - 20));
+          const sy = y + 40 + ((j * 67 + this.time * 20) % prevH);
+          ctx.fillStyle = `rgba(${hex2rgb(c.biome.star)}, ${j % 3 === 0 ? 0.9 : 0.5})`;
+          ctx.fillRect(sx, sy, 1, 1);
+        }
+        // Biome name
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillStyle = c.biome.accent;
+        ctx.font = 'bold 19px ui-monospace, monospace';
+        ctx.fillText(c.biome.name, rx + cw / 2, y + 160);
+        // Modifier
+        const m = MODIFIERS[c.modifier];
+        ctx.fillStyle = c.modifier === 'none' ? '#cde' : '#fc6';
+        ctx.font = 'bold 14px ui-monospace, monospace';
+        ctx.fillText('[' + m.name + ']', rx + cw / 2, y + 196);
+        ctx.fillStyle = '#a58abd';
+        ctx.font = '12px ui-monospace, monospace';
+        wrapText(ctx, m.desc || '—', rx + cw / 2, y + 220, cw - 20, 15);
+        // Hover highlight
+        const hover = Input.mouse.x >= rx && Input.mouse.x <= rx + cw &&
+                      Input.mouse.y >= y && Input.mouse.y <= y + ch;
+        if (hover) {
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+          ctx.strokeRect(rx + 1, y + 1, cw - 2, ch - 2);
+        }
+        this.mapRects.push({ x: rx, y, w: cw, h: ch, i });
+      }
+    }
+
+    _renderSectorIntro(ctx) {
+      const a = Math.min(1, this.sectorIntroT / 1.8);
+      const slide = 1 - Math.pow(a, 2);
+      const y = CY - slide * 40;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = this.biome.accent;
+      ctx.font = 'bold 30px ui-monospace, monospace';
+      ctx.shadowColor = this.biome.accent; ctx.shadowBlur = 18;
+      const label = this.sector === 5 ? '\u2668  FINAL SECTOR  \u2668' : 'SECTOR ' + this.sector + ' / 5';
+      ctx.fillText(label, CX, y - 40);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 48px ui-monospace, monospace';
+      ctx.fillText(this.biome.name, CX, y + 10);
+      ctx.shadowBlur = 0;
+      if (this.modifier !== 'none') {
+        ctx.fillStyle = '#fc6';
+        ctx.font = 'bold 18px ui-monospace, monospace';
+        const m = MODIFIERS[this.modifier];
+        ctx.fillText('[' + m.name + ']  ' + m.desc, CX, y + 60);
       }
     }
 
@@ -937,7 +1276,25 @@
       this._drawMissiles(ctx);
       this._drawShip(ctx);
       this._drawShield(ctx);
+      this._drawPlayerDrone(ctx);
       this._drawHudExtras(ctx);
+    }
+
+    _drawPlayerDrone(ctx) {
+      const d = this.playerDrone;
+      if (!d || !this.upgrades.drone) return;
+      ctx.save();
+      ctx.translate(d.x || this.ship.x, d.y || this.ship.y);
+      ctx.rotate(d.ang);
+      ctx.fillStyle = '#7ae0ff';
+      ctx.strokeStyle = '#cfeffd'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(7, 0); ctx.lineTo(-5, 5); ctx.lineTo(-2, 0); ctx.lineTo(-5, -5);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      // orbit ring
+      ctx.strokeStyle = 'rgba(122,224,255,0.18)';
+      ctx.beginPath(); ctx.arc(this.ship.x, this.ship.y, d.r, 0, Math.PI * 2); ctx.stroke();
     }
 
     _drawRocks(ctx) {
@@ -1300,15 +1657,42 @@
       ctx.font = 'bold 54px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.shadowColor = '#ffd86b'; ctx.shadowBlur = 22;
-      ctx.fillText('HIVE DESTROYED', CX, 200);
+      ctx.fillText('HIVE DESTROYED', CX, 160);
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#cfe9ff'; ctx.font = '18px ui-monospace, monospace';
-      ctx.fillText('All 10 waves cleared · the swarm is silenced.', CX, 260);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px ui-monospace, monospace';
-      ctx.fillText('Score: ' + this.score, CX, 320);
+      ctx.fillStyle = '#cfe9ff'; ctx.font = '16px ui-monospace, monospace';
+      ctx.fillText('All 5 sectors cleared \u00b7 the swarm is silenced.', CX, 210);
+
+      // Run summary box
+      const bw = 440, bh = 170;
+      const bx = CX - bw / 2, by = 250;
+      ctx.fillStyle = 'rgba(10,20,40,0.7)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = '#7cd9ff'; ctx.lineWidth = 1;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      const sx = bx + 30;
+      ctx.fillText('Score:',   sx, by + 38);
+      ctx.fillText('Waves:',   sx, by + 68);
+      ctx.fillText('Bay:',     sx, by + 98);
+      ctx.fillText('Upgrades:',sx, by + 128);
+      ctx.textAlign = 'right';
+      const ex = bx + bw - 30;
+      ctx.fillStyle = '#ffd86b';
+      ctx.fillText(String(this.score),                     ex, by + 38);
+      ctx.fillText(this.wavesClearedThisRun + '/' + TOTAL_WAVES, ex, by + 68);
+      ctx.fillText('\u25CF ' + Storage.getGameWallet('asteroids'), ex, by + 98);
+      const ownedCount = UPGRADES.filter(u => this.upgrades[u.id]).length;
+      ctx.fillText(ownedCount + ' / ' + UPGRADES.length,   ex, by + 128);
+
       if (this.victoryTimer > 1.5) {
         ctx.fillStyle = '#7cd9ff'; ctx.font = '14px ui-monospace, monospace';
-        ctx.fillText('Click to claim victory', CX, 420);
+        ctx.textAlign = 'center';
+        const blink = Math.sin(this.victoryTimer * 4) > 0 ? 1 : 0.4;
+        ctx.globalAlpha = blink;
+        ctx.fillText('click to return to arcade', CX, by + bh + 40);
+        ctx.globalAlpha = 1;
       }
     }
   }
@@ -1318,6 +1702,20 @@
     if (v < 0) return v + max;
     if (v >= max) return v - max;
     return v;
+  }
+
+  function hex2rgb(hex) {
+    const h = hex.replace('#', '');
+    if (h.length === 3) {
+      const r = parseInt(h[0] + h[0], 16);
+      const g = parseInt(h[1] + h[1], 16);
+      const b = parseInt(h[2] + h[2], 16);
+      return r + ',' + g + ',' + b;
+    }
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return r + ',' + g + ',' + b;
   }
 
   function wrapText(ctx, text, cx, y, maxW, lineH) {

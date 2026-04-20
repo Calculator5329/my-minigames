@@ -215,6 +215,49 @@
         <polygon points="18,48 8,52 12,40" fill="#5a7a9a"/>
         <polygon points="12,40 0,36 0,44" fill="#ffae44" opacity="0.95"/>
       </g>
+    </svg>`,
+
+    'aster.upgrade_overclock': `<svg viewBox="0 0 80 80">${defs}
+      <rect x="4" y="4" width="72" height="72" rx="12" fill="#0a1428" stroke="#7cd9ff" stroke-width="2"/>
+      <g filter="url(#aGlow)">
+        <circle cx="40" cy="40" r="22" fill="none" stroke="#ffd86b" stroke-width="3"/>
+        <line x1="40" y1="40" x2="40" y2="22" stroke="#ff8c3a" stroke-width="3" stroke-linecap="round"/>
+        <line x1="40" y1="40" x2="56" y2="40" stroke="#ff8c3a" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="40" cy="40" r="3" fill="#fff"/>
+        <path d="M16 16 L26 20 M64 16 L54 20" stroke="#ffd86b" stroke-width="2" stroke-linecap="round"/>
+      </g>
+    </svg>`,
+
+    'aster.upgrade_salvage': `<svg viewBox="0 0 80 80">${defs}
+      <rect x="4" y="4" width="72" height="72" rx="12" fill="#0a1428" stroke="#7cd9ff" stroke-width="2"/>
+      <g filter="url(#aGlow)">
+        <circle cx="40" cy="40" r="18" fill="#ffd86b" stroke="#fff" stroke-width="2"/>
+        <text x="40" y="48" text-anchor="middle" font-family="monospace" font-size="22" font-weight="bold" fill="#0a1428">$</text>
+        <circle cx="22" cy="22" r="3" fill="#cfe9ff"/>
+        <circle cx="58" cy="22" r="3" fill="#cfe9ff"/>
+        <circle cx="22" cy="58" r="3" fill="#cfe9ff"/>
+        <circle cx="58" cy="58" r="3" fill="#cfe9ff"/>
+      </g>
+    </svg>`,
+
+    'aster.upgrade_drone': `<svg viewBox="0 0 80 80">${defs}
+      <rect x="4" y="4" width="72" height="72" rx="12" fill="#0a1428" stroke="#7cd9ff" stroke-width="2"/>
+      <g filter="url(#aGlow)">
+        <circle cx="40" cy="40" r="24" fill="none" stroke="#7ae0ff" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <polygon points="40,32 44,44 40,40 36,44" fill="#7ae0ff" stroke="#fff" stroke-width="1.5"/>
+        <circle cx="40" cy="40" r="4" fill="#ffd86b"/>
+        <polygon points="62,18 66,22 62,26 58,22" fill="#7ae0ff"/>
+      </g>
+    </svg>`,
+
+    'aster.upgrade_emp': `<svg viewBox="0 0 80 80">${defs}
+      <rect x="4" y="4" width="72" height="72" rx="12" fill="#0a1428" stroke="#7cd9ff" stroke-width="2"/>
+      <g filter="url(#aGlow)">
+        <circle cx="40" cy="40" r="8" fill="#7ae0ff" stroke="#fff" stroke-width="2"/>
+        <circle cx="40" cy="40" r="18" fill="none" stroke="#7ae0ff" stroke-width="2" stroke-dasharray="3 4"/>
+        <circle cx="40" cy="40" r="28" fill="none" stroke="#7ae0ff" stroke-width="1.5" opacity="0.6"/>
+        <path d="M40 10 L40 22 M40 58 L40 70 M10 40 L22 40 M58 40 L70 40" stroke="#ffd86b" stroke-width="2" stroke-linecap="round"/>
+      </g>
     </svg>`
   });
 })();
