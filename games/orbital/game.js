@@ -257,6 +257,9 @@
       }
       this.cash -= res.cost;
       this.flashMessage('\u2605 ' + res.name + ' AWAKENED', '#ffd86b');
+      if (O.ParagonCinematic) {
+        O.ParagonCinematic.start(this, t, O.Towers.get(t.key).paragon);
+      }
     }
 
     sellSelected() {
@@ -518,6 +521,15 @@
       if (this.endScreen) {
         if (Input.mouse.justPressed) this.handleClick(this._mx, this._my);
         return;
+      }
+
+      if (O.ParagonCinematic) {
+        O.ParagonCinematic.tick(this, dt);
+        if (O.ParagonCinematic.active(this)) {
+          for (const f of this.floaters) { f.t -= rdt; f.y += f.vy * rdt; }
+          this.floaters = this.floaters.filter(f => f.t > 0);
+          return;
+        }
       }
 
       O.UI.SidePanel.handleHover(this._mx, this._my, this);
@@ -1653,6 +1665,8 @@
       if (this.endScreen && O.UI.EndScreen) {
         O.UI.EndScreen.draw(ctx, this);
       }
+
+      if (O.ParagonCinematic) O.ParagonCinematic.draw(ctx, this);
     }
 
     _drawPath(ctx) {
