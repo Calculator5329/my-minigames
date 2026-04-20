@@ -120,10 +120,47 @@
     return tower;
   }
 
+  function paragonLockReason(tower, cash) {
+    const s = spec(tower.key);
+    if (!s || !s.paragon) return 'unavailable';
+    const pt = tower.pathTiers || { A: 0, B: 0 };
+    const hasDualMastery =
+      (pt.A >= 4 && pt.B >= 2) || (pt.B >= 4 && pt.A >= 2);
+    if (!hasDualMastery) return 'paths';
+    if ((tower.level | 0) < 3) return 'level';
+    const life = (O.Persist && O.Persist.getLifetimeXp)
+      ? O.Persist.getLifetimeXp(tower.key) : 0;
+    if (life < (s.paragon.unlockLifetimeXp | 0)) return 'lifetimeXp';
+    if ((cash | 0) < s.paragon.cost) return 'cash';
+    return null;
+  }
+  function canBuyParagon(tower, cash) {
+    return paragonLockReason(tower, cash) === null;
+  }
+  function buyParagon(tower, cash) {
+    if (!canBuyParagon(tower, cash)) {
+      return { ok: false, error: paragonLockReason(tower, cash) };
+    }
+    const s = spec(tower.key);
+    const p = s.paragon;
+    tower.totalSpent = (tower.totalSpent || 0) + p.cost;
+    tower.paragon = true;
+    tower.paragonName = p.name;
+    tower.paragonAccent = p.accent;
+    tower.stats = Object.assign({}, p.stats);
+    tower.stats.sprite = p.sprite;
+    tower.abilityIds = { A: p.ability || null, B: null };
+    tower.abilityCDs = {};
+    tower.abilityFx  = {};
+    tower.level = Math.max(tower.level || 1, 3);
+    return { ok: true, cost: p.cost, name: p.name, ability: p.ability };
+  }
+
   O.Upgrades = {
     spec, pathDef, tierDef,
     allowedTiers, canBuy, lockReason,
     rebuildStats, buy, refundValue,
-    newPlacedTower, topAbility
+    newPlacedTower, topAbility,
+    paragonLockReason, canBuyParagon, buyParagon
   };
 })();

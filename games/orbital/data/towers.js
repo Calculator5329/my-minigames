@@ -57,6 +57,16 @@
               ability: 'preciseShot' }
           ]
         }
+      },
+      paragon: {
+        name: 'Apex Bolt',
+        cost: 22000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_dart_paragon',
+        accent: '#ffd86b',
+        desc: 'Master dart platform — storm of bolts.',
+        stats: { range: 260, fireRate: 11, dmg: 14, pierce: 8, projSpeed: 720, proj: 'bolt', priority: 'first' },
+        ability: 'paragonBoltStorm'
       }
     },
 
@@ -99,6 +109,16 @@
               ability: 'scatterShot' }
           ]
         }
+      },
+      paragon: {
+        name: 'Worldbreaker',
+        cost: 28000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_cannon_paragon',
+        accent: '#ff5530',
+        desc: 'Cataclysmic siege cannon.',
+        stats: { range: 220, fireRate: 0.9, dmg: 180, splash: 130, projSpeed: 420, proj: 'plasma', priority: 'first' },
+        ability: 'paragonOrbitalDrop'
       }
     },
 
@@ -141,6 +161,16 @@
               ability: 'solarLance' }
           ]
         }
+      },
+      paragon: {
+        name: 'Helios Array',
+        cost: 25000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_beam_paragon',
+        accent: '#ffd86b',
+        desc: 'Weaponized star, screen-wide reach.',
+        stats: { range: 280, fireRate: 0, beamDps: 260, chain: 8, proj: 'beam', priority: 'first' },
+        ability: 'paragonSunburn'
       }
     },
 
@@ -183,6 +213,16 @@
               ability: 'quantumAnchor' }
           ]
         }
+      },
+      paragon: {
+        name: 'Null Zone',
+        cost: 24000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_gravity_paragon',
+        accent: '#a070ff',
+        desc: 'Inescapable gravitic singularity.',
+        stats: { range: 240, slow: 0.75, collapseRadius: 180, pullDps: 4, priority: 'first' },
+        ability: 'paragonCollapseAll'
       }
     },
 
@@ -353,6 +393,16 @@
               ability: 'icbm' }
           ]
         }
+      },
+      paragon: {
+        name: 'Harbinger',
+        cost: 30000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_missile_paragon',
+        accent: '#ff8040',
+        desc: 'Orbital command warhead array.',
+        stats: { range: 9999, fireRate: 1.6, dmg: 90, splash: 120, projSpeed: 300, proj: 'missile', priority: 'first' },
+        ability: 'paragonMIRV'
       }
     },
 
@@ -483,6 +533,16 @@
               ability: 'disintegrate' }
           ]
         }
+      },
+      paragon: {
+        name: 'Watcher',
+        cost: 35000,
+        unlockLifetimeXp: 5000,
+        sprite: 'orb_turret_sniper_paragon',
+        accent: '#7ae0ff',
+        desc: 'Deletes the biggest threats in sight.',
+        stats: { range: 9999, fireRate: 0.6, dmg: 900, pierce: 4, antiArmor: true, projSpeed: 900, proj: 'bolt', priority: 'first' },
+        ability: 'paragonErase'
       }
     },
 
