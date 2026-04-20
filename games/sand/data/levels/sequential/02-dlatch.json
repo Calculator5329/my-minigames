@@ -1,0 +1,27 @@
+{
+  "id": "sequential-dlatch",
+  "track": "sequential",
+  "order": 2,
+  "title": "D Latch",
+  "brief": "Output Q follows D while EN is high, and holds when EN is low.",
+  "difficulty": 3,
+  "prerequisites": ["sequential-srlatch"],
+  "availableGates": ["DLATCH"],
+  "sequential": true,
+  "io": {
+    "inputs":  [{ "label": "D" }, { "label": "EN" }],
+    "outputs": [{ "label": "Q" }]
+  },
+  "truthTable": [
+    { "in": { "D": 0, "EN": 1, "__clk": "rise" }, "out": { "Q": 0 } },
+    { "in": { "D": 1, "EN": 1, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "D": 0, "EN": 0, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "D": 1, "EN": 0, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "D": 0, "EN": 1, "__clk": "rise" }, "out": { "Q": 0 } }
+  ],
+  "parGates": 1,
+  "unlocksComponent": { "id": "dlatch", "name": "D Latch" },
+  "hints": [
+    "Single DLATCH primitive. Wire D and EN directly."
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "comparison-greater",
+  "track": "comparison",
+  "order": 2,
+  "title": "Greater-Than (2-bit)",
+  "brief": "Output 1 when 2-bit A > B.",
+  "difficulty": 3,
+  "prerequisites": ["comparison-equality"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A1" }, { "label": "A0" }, { "label": "B1" }, { "label": "B0" }],
+    "outputs": [{ "label": "GT" }]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0, 0], "out": [0] },
+    { "in": [0, 0, 0, 1], "out": [0] },
+    { "in": [0, 1, 0, 0], "out": [1] },
+    { "in": [0, 1, 0, 1], "out": [0] },
+    { "in": [1, 0, 0, 0], "out": [1] },
+    { "in": [1, 0, 0, 1], "out": [1] },
+    { "in": [1, 0, 1, 0], "out": [0] },
+    { "in": [1, 0, 1, 1], "out": [0] },
+    { "in": [1, 1, 1, 0], "out": [1] },
+    { "in": [1, 1, 1, 1], "out": [0] }
+  ],
+  "parGates": 6,
+  "hints": [
+    "GT = (A1 AND NOT B1) OR ((A1 XNOR B1) AND (A0 AND NOT B0)).",
+    "About 5-7 gates; tuning friendly."
+  ]
+}

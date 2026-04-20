@@ -1,0 +1,27 @@
+{
+  "id": "sequential-dff",
+  "track": "sequential",
+  "order": 3,
+  "title": "D Flip-Flop",
+  "brief": "Capture D on the rising edge of CLK.",
+  "difficulty": 3,
+  "prerequisites": ["sequential-dlatch"],
+  "availableGates": ["DFF"],
+  "sequential": true,
+  "io": {
+    "inputs":  [{ "label": "D" }],
+    "outputs": [{ "label": "Q" }]
+  },
+  "truthTable": [
+    { "in": { "D": 1, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "D": 0, "__clk": "stay" }, "out": { "Q": 1 } },
+    { "in": { "D": 0, "__clk": "rise" }, "out": { "Q": 0 } },
+    { "in": { "D": 1, "__clk": "stay" }, "out": { "Q": 0 } },
+    { "in": { "D": 1, "__clk": "rise" }, "out": { "Q": 1 } }
+  ],
+  "parGates": 1,
+  "unlocksComponent": { "id": "dff", "name": "D Flip-Flop" },
+  "hints": [
+    "Single DFF primitive with the global CLOCK wired to its clk pin."
+  ]
+}

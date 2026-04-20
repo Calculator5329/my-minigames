@@ -1,0 +1,36 @@
+{
+  "id": "alu-alu4",
+  "track": "alu",
+  "order": 3,
+  "title": "4-Bit ALU (Finale)",
+  "brief": "The big one. 4-bit A, 4-bit B, 2-bit Op: 00=AND, 01=OR, 10=ADD, 11=SUB. Output 4-bit Y + Cout + Zero flag.",
+  "difficulty": 5,
+  "prerequisites": ["alu-sevenseg"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "full_adder", "adder4", "mux4"],
+  "io": {
+    "inputs":  [
+      { "label": "A3" }, { "label": "A2" }, { "label": "A1" }, { "label": "A0" },
+      { "label": "B3" }, { "label": "B2" }, { "label": "B1" }, { "label": "B0" },
+      { "label": "Op1" }, { "label": "Op0" }
+    ],
+    "outputs": [
+      { "label": "Y3" }, { "label": "Y2" }, { "label": "Y1" }, { "label": "Y0" },
+      { "label": "Cout" }, { "label": "Zero" }
+    ]
+  },
+  "truthTable": [
+    { "in": [0,0,0,0, 0,0,0,0, 0,0], "out": [0,0,0,0, 0, 1] },
+    { "in": [0,1,0,1, 0,0,1,1, 0,0], "out": [0,0,0,1, 0, 0] },
+    { "in": [0,1,0,1, 0,0,1,1, 0,1], "out": [0,1,1,1, 0, 0] },
+    { "in": [0,1,0,1, 0,0,1,1, 1,0], "out": [1,0,0,0, 0, 0] },
+    { "in": [1,1,1,1, 0,0,0,1, 1,1], "out": [1,1,1,0, 1, 0] },
+    { "in": [1,0,1,0, 1,0,1,0, 1,1], "out": [0,0,0,0, 1, 1] }
+  ],
+  "parGates": 20,
+  "unlocksComponent": { "id": "alu4", "name": "4-Bit ALU" },
+  "hints": [
+    "Reuse your adder4 for ADD and SUB (SUB = ADD with B inverted and Cin=1).",
+    "Four 4:1 muxes to pick the right result bit.",
+    "Zero = NOR of all four Y outputs."
+  ]
+}

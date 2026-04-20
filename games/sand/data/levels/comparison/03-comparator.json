@@ -1,0 +1,30 @@
+{
+  "id": "comparison-comparator",
+  "track": "comparison",
+  "order": 3,
+  "title": "2-Bit Comparator",
+  "brief": "Full comparator: output EQ, LT, GT simultaneously.",
+  "difficulty": 4,
+  "prerequisites": ["comparison-greater"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "XNOR"],
+  "io": {
+    "inputs":  [{ "label": "A1" }, { "label": "A0" }, { "label": "B1" }, { "label": "B0" }],
+    "outputs": [{ "label": "EQ" }, { "label": "LT" }, { "label": "GT" }]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0, 0], "out": [1, 0, 0] },
+    { "in": [0, 0, 0, 1], "out": [0, 1, 0] },
+    { "in": [0, 1, 0, 0], "out": [0, 0, 1] },
+    { "in": [0, 1, 0, 1], "out": [1, 0, 0] },
+    { "in": [1, 0, 0, 1], "out": [0, 0, 1] },
+    { "in": [1, 0, 1, 0], "out": [1, 0, 0] },
+    { "in": [1, 0, 1, 1], "out": [0, 1, 0] },
+    { "in": [1, 1, 1, 0], "out": [0, 0, 1] },
+    { "in": [1, 1, 1, 1], "out": [1, 0, 0] }
+  ],
+  "parGates": 8,
+  "unlocksComponent": { "id": "cmp2", "name": "2-Bit Comparator" },
+  "hints": [
+    "Reuse the Equality and Greater-Than logic; LT = NOT (EQ OR GT)."
+  ]
+}

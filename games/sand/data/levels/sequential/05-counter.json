@@ -1,0 +1,26 @@
+{
+  "id": "sequential-counter",
+  "track": "sequential",
+  "order": 5,
+  "title": "4-Bit Counter",
+  "brief": "Each clock tick increments Q by 1. When RST is 1, reset Q to 0 on the next rising edge.",
+  "difficulty": 5,
+  "prerequisites": ["sequential-register"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "DFF"],
+  "sequential": true,
+  "io": {
+    "inputs":  [{ "label": "RST" }],
+    "outputs": [{ "label": "Q3" }, { "label": "Q2" }, { "label": "Q1" }, { "label": "Q0" }]
+  },
+  "truthTable": [
+    { "in": { "RST": 1, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 0, "Q1": 0, "Q0": 0 } },
+    { "in": { "RST": 0, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 0, "Q1": 0, "Q0": 1 } },
+    { "in": { "RST": 0, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 0, "Q1": 1, "Q0": 0 } },
+    { "in": { "RST": 0, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 0, "Q1": 1, "Q0": 1 } },
+    { "in": { "RST": 0, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 1, "Q1": 0, "Q0": 0 } }
+  ],
+  "parGates": 8,
+  "hints": [
+    "Four DFFs. Each bit flips when all lower bits are 1 (carry chain). AND chain + XOR feedback, gated by NOT RST."
+  ]
+}

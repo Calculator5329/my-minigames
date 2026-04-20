@@ -1,0 +1,27 @@
+{
+  "id": "sequential-srlatch",
+  "track": "sequential",
+  "order": 1,
+  "title": "SR Latch",
+  "brief": "Use an SR Latch to remember state: Q goes high when S pulses and stays there until R pulses.",
+  "difficulty": 3,
+  "prerequisites": ["comparison-comparator"],
+  "availableGates": ["SRLATCH"],
+  "sequential": true,
+  "io": {
+    "inputs":  [{ "label": "S" }, { "label": "R" }],
+    "outputs": [{ "label": "Q" }]
+  },
+  "truthTable": [
+    { "in": { "S": 0, "R": 0, "__clk": "stay" }, "out": { "Q": 0 } },
+    { "in": { "S": 1, "R": 0, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "S": 0, "R": 0, "__clk": "rise" }, "out": { "Q": 1 } },
+    { "in": { "S": 0, "R": 1, "__clk": "rise" }, "out": { "Q": 0 } },
+    { "in": { "S": 0, "R": 0, "__clk": "rise" }, "out": { "Q": 0 } }
+  ],
+  "parGates": 1,
+  "unlocksComponent": { "id": "srlatch", "name": "SR Latch" },
+  "hints": [
+    "Drag a single SRLATCH primitive and wire S and R directly."
+  ]
+}

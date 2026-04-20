@@ -13,6 +13,20 @@
     "arithmetic/04-4bit-adder.json",
     "mux/01-mux2.json",
     "mux/02-mux4.json",
-    "mux/03-demux4.json"
+    "mux/03-demux4.json",
+    "encoding/01-dec24.json",
+    "encoding/02-enc42.json",
+    "encoding/03-priority.json",
+    "comparison/01-equality.json",
+    "comparison/02-greater.json",
+    "comparison/03-comparator.json",
+    "sequential/01-srlatch.json",
+    "sequential/02-dlatch.json",
+    "sequential/03-dff.json",
+    "sequential/04-register.json",
+    "sequential/05-counter.json",
+    "alu/01-alu2.json",
+    "alu/02-sevenseg.json",
+    "alu/03-alu4.json"
   ]
 }

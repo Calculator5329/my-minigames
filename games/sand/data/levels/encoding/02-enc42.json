@@ -1,0 +1,25 @@
+{
+  "id": "encoding-enc42",
+  "track": "encoding",
+  "order": 2,
+  "title": "4-to-2 Encoder",
+  "brief": "Convert a one-hot 4-input (A0..A3 where exactly one is 1) into a 2-bit select (S1, S0).",
+  "difficulty": 3,
+  "prerequisites": ["encoding-dec24"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A0" }, { "label": "A1" }, { "label": "A2" }, { "label": "A3" }],
+    "outputs": [{ "label": "S1" }, { "label": "S0" }]
+  },
+  "truthTable": [
+    { "in": [1, 0, 0, 0], "out": [0, 0] },
+    { "in": [0, 1, 0, 0], "out": [0, 1] },
+    { "in": [0, 0, 1, 0], "out": [1, 0] },
+    { "in": [0, 0, 0, 1], "out": [1, 1] }
+  ],
+  "parGates": 2,
+  "hints": [
+    "S1 = A2 OR A3.",
+    "S0 = A1 OR A3."
+  ]
+}

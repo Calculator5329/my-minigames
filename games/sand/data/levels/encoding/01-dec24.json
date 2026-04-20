@@ -1,0 +1,25 @@
+{
+  "id": "encoding-dec24",
+  "track": "encoding",
+  "order": 1,
+  "title": "2-to-4 Decoder",
+  "brief": "Decode 2-bit select (S1, S0) into one-hot 4-line output (Y0..Y3).",
+  "difficulty": 3,
+  "prerequisites": ["mux-demux4"],
+  "availableGates": ["AND", "OR", "NOT", "NAND", "NOR"],
+  "io": {
+    "inputs":  [{ "label": "S1" }, { "label": "S0" }],
+    "outputs": [{ "label": "Y0" }, { "label": "Y1" }, { "label": "Y2" }, { "label": "Y3" }]
+  },
+  "truthTable": [
+    { "in": [0, 0], "out": [1, 0, 0, 0] },
+    { "in": [0, 1], "out": [0, 1, 0, 0] },
+    { "in": [1, 0], "out": [0, 0, 1, 0] },
+    { "in": [1, 1], "out": [0, 0, 0, 1] }
+  ],
+  "parGates": 6,
+  "unlocksComponent": { "id": "dec24", "name": "2-to-4 Decoder" },
+  "hints": [
+    "4 output ANDs with input combinations of (S1,S0), (NOT S1, S0), etc. Two NOT gates + 4 ANDs."
+  ]
+}

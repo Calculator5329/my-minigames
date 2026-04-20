@@ -1,0 +1,29 @@
+{
+  "id": "encoding-priority",
+  "track": "encoding",
+  "order": 3,
+  "title": "Priority Encoder",
+  "brief": "4-input priority encoder: output the index of the highest A that is 1 (A3 highest). If none is 1, output 00.",
+  "difficulty": 4,
+  "prerequisites": ["encoding-enc42"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "A0" }, { "label": "A1" }, { "label": "A2" }, { "label": "A3" }],
+    "outputs": [{ "label": "S1" }, { "label": "S0" }]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0, 0], "out": [0, 0] },
+    { "in": [1, 0, 0, 0], "out": [0, 0] },
+    { "in": [0, 1, 0, 0], "out": [0, 1] },
+    { "in": [1, 1, 0, 0], "out": [0, 1] },
+    { "in": [0, 0, 1, 0], "out": [1, 0] },
+    { "in": [1, 1, 1, 0], "out": [1, 0] },
+    { "in": [0, 0, 0, 1], "out": [1, 1] },
+    { "in": [1, 1, 1, 1], "out": [1, 1] }
+  ],
+  "parGates": 6,
+  "hints": [
+    "S1 = A2 OR A3.",
+    "S0 = A3 OR (A1 AND NOT A2 AND NOT A3)."
+  ]
+}

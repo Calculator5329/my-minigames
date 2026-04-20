@@ -1,0 +1,31 @@
+{
+  "id": "alu-alu2",
+  "track": "alu",
+  "order": 1,
+  "title": "2-Bit ALU",
+  "brief": "Given 2-bit A, 2-bit B, and a 2-bit opcode Op: Op=00 AND, Op=01 OR, Op=10 ADD, Op=11 SUB (A-B mod 4). Output 2-bit Y.",
+  "difficulty": 5,
+  "prerequisites": ["sequential-counter"],
+  "availableGates": ["AND", "OR", "NOT", "XOR", "mux2", "mux4", "full_adder", "half_adder"],
+  "io": {
+    "inputs":  [
+      { "label": "A1" }, { "label": "A0" },
+      { "label": "B1" }, { "label": "B0" },
+      { "label": "Op1" }, { "label": "Op0" }
+    ],
+    "outputs": [{ "label": "Y1" }, { "label": "Y0" }]
+  },
+  "truthTable": [
+    { "in": [1, 1, 1, 0, 0, 0], "out": [1, 0] },
+    { "in": [1, 0, 0, 1, 0, 1], "out": [1, 1] },
+    { "in": [0, 1, 0, 1, 1, 0], "out": [1, 0] },
+    { "in": [1, 0, 0, 1, 1, 0], "out": [1, 1] },
+    { "in": [1, 0, 0, 1, 1, 1], "out": [0, 1] },
+    { "in": [0, 1, 1, 0, 1, 1], "out": [1, 1] }
+  ],
+  "parGates": 10,
+  "unlocksComponent": { "id": "alu2", "name": "2-Bit ALU" },
+  "hints": [
+    "Compute all four results in parallel, then use two 4:1 muxes (selected by Op1, Op0) to pick the output bits."
+  ]
+}

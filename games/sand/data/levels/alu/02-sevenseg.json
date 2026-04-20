@@ -1,0 +1,34 @@
+{
+  "id": "alu-sevenseg",
+  "track": "alu",
+  "order": 2,
+  "title": "7-Segment Decoder",
+  "brief": "Convert a 4-bit number (B3..B0) into 7 segment outputs (a..g) for a common-cathode 7-segment digit.",
+  "difficulty": 4,
+  "prerequisites": ["alu-alu2"],
+  "availableGates": ["AND", "OR", "NOT"],
+  "io": {
+    "inputs":  [{ "label": "B3" }, { "label": "B2" }, { "label": "B1" }, { "label": "B0" }],
+    "outputs": [
+      { "label": "a" }, { "label": "b" }, { "label": "c" }, { "label": "d" },
+      { "label": "e" }, { "label": "f" }, { "label": "g" }
+    ]
+  },
+  "truthTable": [
+    { "in": [0, 0, 0, 0], "out": [1, 1, 1, 1, 1, 1, 0] },
+    { "in": [0, 0, 0, 1], "out": [0, 1, 1, 0, 0, 0, 0] },
+    { "in": [0, 0, 1, 0], "out": [1, 1, 0, 1, 1, 0, 1] },
+    { "in": [0, 0, 1, 1], "out": [1, 1, 1, 1, 0, 0, 1] },
+    { "in": [0, 1, 0, 0], "out": [0, 1, 1, 0, 0, 1, 1] },
+    { "in": [0, 1, 0, 1], "out": [1, 0, 1, 1, 0, 1, 1] },
+    { "in": [0, 1, 1, 0], "out": [1, 0, 1, 1, 1, 1, 1] },
+    { "in": [0, 1, 1, 1], "out": [1, 1, 1, 0, 0, 0, 0] },
+    { "in": [1, 0, 0, 0], "out": [1, 1, 1, 1, 1, 1, 1] },
+    { "in": [1, 0, 0, 1], "out": [1, 1, 1, 1, 0, 1, 1] }
+  ],
+  "parGates": 30,
+  "hints": [
+    "Each segment is a minterm sum over the 10 digits.",
+    "This one is tedious — take your time."
+  ]
+}

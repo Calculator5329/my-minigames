@@ -1,0 +1,28 @@
+{
+  "id": "sequential-register",
+  "track": "sequential",
+  "order": 4,
+  "title": "4-Bit Register",
+  "brief": "Store a 4-bit value with a shared write-enable. On each rising edge, if WE is 1, capture D[3:0] into Q[3:0].",
+  "difficulty": 4,
+  "prerequisites": ["sequential-dff"],
+  "availableGates": ["AND", "OR", "NOT", "DFF"],
+  "sequential": true,
+  "io": {
+    "inputs":  [
+      { "label": "D3" }, { "label": "D2" }, { "label": "D1" }, { "label": "D0" },
+      { "label": "WE" }
+    ],
+    "outputs": [{ "label": "Q3" }, { "label": "Q2" }, { "label": "Q1" }, { "label": "Q0" }]
+  },
+  "truthTable": [
+    { "in": { "D3": 1, "D2": 0, "D1": 1, "D0": 1, "WE": 1, "__clk": "rise" }, "out": { "Q3": 1, "Q2": 0, "Q1": 1, "Q0": 1 } },
+    { "in": { "D3": 0, "D2": 0, "D1": 0, "D0": 0, "WE": 0, "__clk": "rise" }, "out": { "Q3": 1, "Q2": 0, "Q1": 1, "Q0": 1 } },
+    { "in": { "D3": 0, "D2": 1, "D1": 0, "D0": 1, "WE": 1, "__clk": "rise" }, "out": { "Q3": 0, "Q2": 1, "Q1": 0, "Q0": 1 } }
+  ],
+  "parGates": 4,
+  "unlocksComponent": { "id": "reg4", "name": "4-Bit Register" },
+  "hints": [
+    "Four DFFs sharing a clock. Gate each D with WE so the DFF re-captures its own output when WE=0, the new D when WE=1."
+  ]
+}
