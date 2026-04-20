@@ -558,6 +558,7 @@
       y = this._drawPathTree(ctx, game, t, spec, 'A', x, y, w);
       y += 6;
       y = this._drawPathTree(ctx, game, t, spec, 'B', x, y, w);
+      y = this._drawParagonTile(ctx, game, t, spec, x, y, w);
 
       // Footer area: target / abilities / sell
       this._drawFooter(ctx, game, t, x, w);
@@ -659,6 +660,48 @@
       }
       y += tileH + 4;
       return y;
+    },
+
+    _drawParagonTile(ctx, game, t, spec, x, y, w) {
+      if (!spec.paragon || t.paragon) return y;
+      const p = spec.paragon;
+      const reason = O.Upgrades.paragonLockReason(t, game.cash);
+      const ready = reason === null;
+      const life = (O.Persist && O.Persist.getLifetimeXp)
+        ? O.Persist.getLifetimeXp(t.key) : 0;
+      const h = 36;
+      const r = { x, y, w, h };
+      const hover = this._inRect(game._mx, game._my, r);
+      ctx.fillStyle = ready
+        ? (hover ? '#3a3000' : '#25200a')
+        : '#0a0e1a';
+      ctx.fillRect(x, y, w, h);
+      const pulse = ready ? (0.5 + 0.5 * Math.sin(game.time * 6)) : 0;
+      ctx.strokeStyle = ready
+        ? 'rgba(255,216,107,' + (0.6 + 0.4 * pulse).toFixed(3) + ')'
+        : COLORS.locked;
+      ctx.lineWidth = ready ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      ctx.fillStyle = ready ? COLORS.cash : COLORS.textDim;
+      ctx.font = 'bold 12px ui-sans-serif, system-ui';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u2605 ' + p.name, x + 8, y + 12);
+      ctx.font = 'bold 10px ui-monospace, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = ready ? COLORS.cash : COLORS.textDim;
+      ctx.fillText('$' + fmtCash(p.cost), x + w - 8, y + 12);
+      ctx.textAlign = 'left';
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.fillStyle = COLORS.textDim;
+      let sub = '';
+      if (reason === 'paths')            sub = 'need T4 + T2';
+      else if (reason === 'level')       sub = 'need Lv 3';
+      else if (reason === 'lifetimeXp')  sub = 'lifetime ' + life + '/' + p.unlockLifetimeXp;
+      else if (reason === 'cash')        sub = 'insufficient cash';
+      else                                sub = 'READY \u2014 click to ignite';
+      ctx.fillText(sub, x + 8, y + 26);
+      this.hits.push({ rect: r, kind: 'buyParagon' });
+      return y + h + 6;
     },
 
     _drawFooter(ctx, game, t, x, w) {
@@ -849,6 +892,9 @@
           return true;
         case 'buyTier':
           game.tryBuyTier(h.path, h.tier);
+          return true;
+        case 'buyParagon':
+          game.tryBuyParagon(game.selectedTower);
           return true;
         case 'cycleTarget':
           if (game.selectedTower) {

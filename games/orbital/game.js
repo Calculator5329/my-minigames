@@ -248,6 +248,17 @@
       }
     }
 
+    tryBuyParagon(t) {
+      if (!t) return;
+      const res = O.Upgrades.buyParagon(t, this.cash);
+      if (!res.ok) {
+        this.flashMessage('PARAGON: ' + res.error, '#ff5566');
+        return;
+      }
+      this.cash -= res.cost;
+      this.flashMessage('\u2605 ' + res.name + ' AWAKENED', '#ffd86b');
+    }
+
     sellSelected() {
       const t = this.selectedTower;
       if (!t) return;
