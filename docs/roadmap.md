@@ -25,7 +25,7 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 - [x] Crypt
 - [x] Depths
 - [x] Vaultbreaker
-- [x] Orbital
+- [x] **Orbital** — *phase-1 two-path upgrades + XP + abilities (earlier); 2026-04-19 ramp-up: Paragon T5 tier (6 core towers), Commander hero + Saboteur mine layer, paragon unlock cinematic, lead-enemy glow, idle breathing, per-path sprite variants*
 - [x] Learn to Heist
 - [x] Sand
 - [x] **Reactor** (2026-04-19) — *expanded into 10-day campaign + research tree on 2026-04-19*
@@ -49,6 +49,17 @@ A static, zero-build browser arcade — every game is 60 seconds, juicy, instant
 - Pac-lite — single-room dot-eater with one ghost
 
 ## Cross-cutting goals
+- [ ] **Hotel Cascadia — switchboard ground-up rewrite (2026-04-19)** —
+      switchboard ('418 Linden') being rewritten into a hotel-set
+      psychological horror. Same operator-board mechanic; new setting,
+      cast (8 voices), dialogue, ten new mechanics (board grows nightly,
+      3:14 AM architect window, dead-socket bellhop, ARCHIVED stamp,
+      ledger card, painted window, wallpaper sag, operator reset risk,
+      the Replacement on N4, the SUPPLY-closet door on N5), three
+      rewritten endings (CHECK OUT default loop, UNDERSTUDY, DEMOLITION),
+      full audio re-bake. Story prose locked in
+      `docs/plans/2026-04-19-cascadia.md`. Selector card renamed; engine
+      and audio land in subsequent commits.
 - [x] **Public hosting + GitHub (2026-04-19)** — repo pushed to
       https://github.com/Calculator5329/my-minigames, deployed to
       https://notdop-minigames.web.app via Firebase Hosting in project

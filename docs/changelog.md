@@ -4,6 +4,73 @@ A running log of what shipped in each session.
 
 ## 2026-04-19
 
+### Orbital Ramp-Up — paragons, juice, 2 new towers
+Phase-1 expansion shipped earlier; this session layers a T5 climax and
+polish on top.
+
+- **Paragons** for 6 core towers (dart, cannon, beam, gravity, missile,
+  sniper). Unlock gated by T4 on one path + T2 on the other, in-run
+  Level 3, and a lifetime-XP threshold on that tower key (persisted
+  across runs). Buying replaces the tower in place with fixed paragon
+  stats and a signature mega-ability. Each paragon has custom cost
+  ($22k-$35k). Purchase plays a 1.2s cinematic (screen flash, radial
+  shock particles, sliding banner, sim frozen during).
+- **Commander** — one-per-run hero. Auto-levels 1→8 (every 3 rounds
+  placed). Tactician path (rally aura, +dmg debuff, Stand Fast
+  ability) and Gunner path (heavy rounds, anti-armor, Barrage ability).
+  Tray tile greys with "PLACED" after deployment.
+- **Saboteur** — doesn't shoot; plants proximity mines on the path
+  within its range. Minefield (more mines, faster, Saturation ability)
+  or Demolitions (heavier mines, Nuke Mine + manual Detonate ability).
+  Engineer synergy: when within each other's range, saboteur plants
+  mines 2× faster and the engineer's sentry fires 2× faster, with a
+  dotted line visualizing the link.
+- **Graphics juice**: paragon unlock cinematic, per-path sprite
+  variant system (dart A orange / dart B purple POCs; system falls
+  back gracefully for towers without authored variants), pulsing
+  lead-enemy path glow, tower idle breathing.
+- Lifetime-XP persistence per tower key (`O.Persist.addLifetimeXp` /
+  `getLifetimeXp`), powering the paragon unlock gate across runs.
+- 14 new abilities (6 paragon + 2 commander + 2 saboteur + support
+  registrations): BoltStorm, OrbitalDrop, Sunburn, TotalCollapse,
+  MIRV, Erase, StandFast, Barrage, Saturation, Detonate.
+- Tower count 16 → 18.
+- Cache-bust bumped to `?v=4` across all orbital script includes.
+- Design doc `docs/plans/2026-04-19-orbital-rampup-design.md`;
+  implementation plan `docs/plans/2026-04-19-orbital-rampup.md`.
+
+
+### Switchboard → Hotel Cascadia — story locked, manifest renamed
+Switchboard ('418 Linden') is being rewritten ground-up into a new
+setting: an impossibly tall hotel that resets its guests, with a single
+night-shift operator on Floor Zero. The operator-board mechanic
+survives; everything else (story, cast, dialogue, mechanics, endings,
+audio, walkthrough) is replaced. Story prose locked in
+`docs/plans/2026-04-19-cascadia.md` (do not rewrite without sign-off).
+
+This commit lands only the doc + selector-card rename:
+- New plan `docs/plans/2026-04-19-cascadia.md` with the canonical
+  four-paragraph story, eight-voice cast bible, ten new mechanics
+  (M1–M10 — board grows nightly, 3:14 AM architect window, dead-socket
+  bellhop, ARCHIVED stamp, ledger inter-night card, painted window,
+  wallpaper sag, composure-tied operator-reset risk, the Replacement on
+  Night 4, the SUPPLY-closet door on Night 5), three rewritten endings
+  (CHECK OUT — default loop ending in 2026 then back to the desk;
+  UNDERSTUDY; DEMOLITION), and a staged file-by-file change list.
+- `games/switchboard/manifest.js` — title `'418 Linden'` →
+  `'Hotel Cascadia'`; blurb/description/preview brass plate rewritten
+  to setting; accent shift toward sodium-lobby gold + bellhop red.
+  Game `id` stays `switchboard` so saves and asset paths don't break.
+- `docs/plans/2026-04-19-switchboard-redesign.md` archived with a
+  pointer to the Cascadia plan. Pacing tuning, leaky scramble, voice
+  bleed, persistent [L] reminder, and the inter-night Operator's Log
+  card carry forward.
+- `docs/current_task.md` repointed to the Cascadia plan, locked
+  decisions enumerated, implementation order recorded.
+
+Engine wiring, content rewrite, and audio re-bake follow in subsequent
+commits per § Implementation order in the plan.
+
 ### Leap & Ricochet — deep-dive expansion + polish pass
 Picked the two thinnest games in the catalog with the most upside and
 brought both up to a more complete feel. Both had an obviously broken or
